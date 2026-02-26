@@ -6,6 +6,7 @@
 import fs from 'fs-extra';
 import path from 'path';
 import { CLAWREINS_DATA_DIR, logger } from '../core/Logger';
+import { stripControlChars } from '../core/InputSanitizer';
 
 const DECISIONS_FILE = path.join(CLAWREINS_DATA_DIR, 'decisions.jsonl');
 
@@ -29,7 +30,7 @@ export class DecisionLog {
       await fs.ensureDir(CLAWREINS_DATA_DIR);
 
       // Append as JSON Lines (one JSON object per line)
-      const line = JSON.stringify(record) + '\n';
+      const line = stripControlChars(JSON.stringify(record)) + '\n';
       await fs.appendFile(DECISIONS_FILE, line, 'utf8');
 
       logger.debug('Decision logged', { decision: record.decision, module: record.module });

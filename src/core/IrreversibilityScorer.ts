@@ -4,6 +4,8 @@
  * Higher score = harder to undo + higher blast radius.
  */
 
+import { stripControlChars } from './InputSanitizer';
+
 export type IrreversibilityLevel = 'low' | 'medium' | 'high';
 
 export interface IrreversibilityAssessment {
@@ -52,10 +54,10 @@ function clamp(value: number, min: number, max: number): number {
 
 function summarizeParams(params: Record<string, unknown>): string {
   try {
-    const raw = JSON.stringify(params);
+    const raw = stripControlChars(JSON.stringify(params));
     return raw.length > 220 ? `${raw.slice(0, 217)}...` : raw;
   } catch {
-    return String(params);
+    return stripControlChars(String(params));
   }
 }
 

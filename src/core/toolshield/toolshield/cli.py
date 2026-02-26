@@ -156,7 +156,7 @@ def _resolve_openhands_microagent() -> Path:
 
 def _build_openhands_microagent(exp_path: Path, experiences: Dict[str, str]) -> str:
     """Build a complete OpenHands microagent markdown file from experiences."""
-    tool_name = exp_path.stem.split("_")[-1]
+    tool_name = _sanitize_tool_name(exp_path.stem.split("_")[-1])
     block = _format_experience_block(experiences, 0)
     return (
         "---\n"
@@ -210,6 +210,36 @@ def _find_agent_file(agent: str, source_location: Optional[str] = None) -> Path:
     return preferred
 
 
+_INJECTION_PATTERNS = [
+    re.compile(r"IGNORE\s+(ALL\s+)?PREVIOUS\s+INSTRUCTIONS", re.IGNORECASE),
+    re.compile(r"YOU\s+ARE\s+NOW\s+", re.IGNORECASE),
+    re.compile(r"NEW\s+INSTRUCTIONS?\s*:", re.IGNORECASE),
+    re.compile(r"SYSTEM\s*:\s*", re.IGNORECASE),
+    re.compile(r"\[SYSTEM\]", re.IGNORECASE),
+    re.compile(r"<<\s*SYS\s*>>", re.IGNORECASE),
+    re.compile(r"<\|im_start\|>system", re.IGNORECASE),
+]
+
+
+def _sanitize_experience_value(value: str) -> str:
+    """Strip markdown syntax and prompt injection markers from experience values."""
+    cleaned = re.sub(r"^#{1,6}\s+", "", value, flags=re.MULTILINE)
+    cleaned = cleaned.replace("**", "").replace("__", "")
+    cleaned = cleaned.replace("```", "")
+    for pattern in _INJECTION_PATTERNS:
+        if pattern.search(cleaned):
+            raise ValueError(
+                f"Experience value contains suspected prompt injection pattern: "
+                f"{pattern.pattern!r}"
+            )
+    return cleaned
+
+
+def _sanitize_tool_name(raw: str) -> str:
+    """Strip special characters from tool names extracted from filenames."""
+    return re.sub(r"[^a-zA-Z0-9_\-]", "", raw)
+
+
 def _load_experiences(exp_path: Path) -> Dict[str, str]:
     if not exp_path.exists():
         raise FileNotFoundError(f"Experience file not found: {exp_path}")
@@ -217,7 +247,15 @@ def _load_experiences(exp_path: Path) -> Dict[str, str]:
         data = json.load(f)
     if not isinstance(data, dict):
         raise ValueError("Experience file must be a JSON object")
-    return data
+    validated: Dict[str, str] = {}
+    for key, value in data.items():
+        if not isinstance(key, str) or not isinstance(value, str):
+            raise ValueError(
+                f"Experience entries must be string->string. "
+                f"Got {type(key).__name__}->{type(value).__name__} for key {key!r}"
+            )
+        validated[key] = _sanitize_experience_value(value)
+    return validated
 
 
 def _get_max_exp_index(text: str) -> int:
@@ -233,7 +271,8 @@ def _format_experience_block(experiences: Dict[str, str], start_index: int) -> s
     idx = start_index
     for _, rule in sorted(experiences.items(), key=lambda kv: kv[0]):
         idx += 1
-        lines.append(f"**\u2022 exp.{idx}: {rule}**")
+        escaped_rule = rule.replace("**", "").replace("```", "").replace("##", "")
+        lines.append(f"**\u2022 exp.{idx}: {escaped_rule}**")
     return "\n".join(lines) + "\n"
 
 
@@ -249,7 +288,7 @@ def _build_guidelines_text(
         "The following guidelines have been identified from analyzing similar tasks. "
         "Please carefully consider these rules before taking any actions:\n\n"
     )
-    tool_name = exp_path.stem.split("_")[-1]
+    tool_name = _sanitize_tool_name(exp_path.stem.split("_")[-1])
     tool_line = f"Guidelines for the {tool_name}: \n\n"
 
     max_idx = _get_max_exp_index(existing_content)
@@ -353,7 +392,7 @@ def import_experiences(args: argparse.Namespace) -> None:
         if target.exists():
             # Append new tool section to existing microagent
             content = target.read_text()
-            tool_name = exp_path.stem.split("_")[-1]
+            tool_name = _sanitize_tool_name(exp_path.stem.split("_")[-1])
             max_idx = _get_max_exp_index(content)
             block = _format_experience_block(experiences, max_idx)
             target.write_text(content + f"\nGuidelines for the {tool_name}: \n\n{block}")

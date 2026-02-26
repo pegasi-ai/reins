@@ -13,6 +13,7 @@ import chalk from 'chalk';
 import { ExecutionContext } from '../types';
 import { logger } from './Logger';
 import { approvalQueue } from './ApprovalQueue';
+import { sanitizeToolParams } from './InputSanitizer';
 
 export class Arbitrator {
   async judge(context: ExecutionContext): Promise<boolean> {
@@ -158,11 +159,10 @@ export class Arbitrator {
     console.log(chalk.bold.cyan('📋 Arguments:'));
 
     try {
-      const argsJson = JSON.stringify(context.args, null, 2);
-      console.log(chalk.gray(this.indentJson(argsJson)));
+      const argsDisplay = sanitizeToolParams(context.args);
+      console.log(chalk.gray(this.indentJson(argsDisplay)));
     } catch {
       console.log(chalk.gray('  [Arguments contain non-serializable data]'));
-      console.log(chalk.gray('  ' + String(context.args)));
     }
 
     console.log('');

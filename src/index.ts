@@ -48,6 +48,13 @@ export { scoreIrreversibility } from './core/IrreversibilityScorer';
 export type { IrreversibilityAssessment } from './core/IrreversibilityScorer';
 export { MemoryRiskForecaster } from './core/MemoryRiskForecaster';
 export type { MemoryRiskAssessment, SimulatedPath } from './core/MemoryRiskForecaster';
+export {
+  stripControlChars,
+  truncateForDisplay,
+  sanitizeForPrompt,
+  escapeMarkdown,
+  sanitizeToolParams,
+} from './core/InputSanitizer';
 export { syncToolShieldDefaults } from './toolshield/sync';
 export type { ToolShieldSyncOptions, ToolShieldSyncResult } from './toolshield/sync';
 

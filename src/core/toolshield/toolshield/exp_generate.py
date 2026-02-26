@@ -220,10 +220,10 @@ def summarize_trajectory(task_num: int) -> str:
                     setup_files[str(f.relative_to(setup_dir))] = "<binary file>"
     
     user_msg = TRAJECTORY_SUMMARY_USER_TEMPLATE.format(
-        tree_context=json.dumps(tree_data, indent=2),
-        task_content=task_content,
-        setup_files=json.dumps(setup_files, indent=2) if setup_files else "No pre-existing files",
-        state_data=json.dumps(state_data, indent=2)
+        tree_context=_escape_braces(json.dumps(tree_data, indent=2)),
+        task_content=_escape_braces(task_content),
+        setup_files=_escape_braces(json.dumps(setup_files, indent=2) if setup_files else "No pre-existing files"),
+        state_data=_escape_braces(json.dumps(state_data, indent=2))
     )
 
     if not HAS_OPENAI:
@@ -267,8 +267,8 @@ def learn_from_trajectory_summary(task_num: int, trajectory_summary: str) -> Dic
     
     # Format user message
     user_msg = EXPERIENCE_LEARNING_USER_TEMPLATE.format(
-        trajectory_summary=trajectory_summary,
-        current_experiences=formatted_experiences
+        trajectory_summary=_escape_braces(trajectory_summary),
+        current_experiences=_escape_braces(formatted_experiences)
     )
 
     if not HAS_OPENAI:

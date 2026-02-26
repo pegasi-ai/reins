@@ -15,6 +15,7 @@ import { DEFAULT_POLICY } from '../config';
 import { Arbitrator } from './Arbitrator';
 import { DecisionLog, DecisionRecord } from '../storage/DecisionLog';
 import { StatsTracker } from '../storage/StatsTracker';
+import { sanitizeForPrompt, stripControlChars } from './InputSanitizer';
 import { logger } from './Logger';
 import chalk from 'chalk';
 
@@ -74,7 +75,9 @@ export class Interceptor {
 
     if (!allowed) {
       const isChannelMode = !process.stdin.isTTY && sessionKey;
-      const detail = effectiveRule.description || 'No description provided.';
+      const detail = sanitizeForPrompt(
+        stripControlChars(effectiveRule.description || 'No description provided.')
+      );
 
       if (isChannelMode) {
         const instructions = this.buildChannelInstructions(
@@ -126,9 +129,8 @@ export class Interceptor {
     return next;
   }
 
-  private generateConfirmationToken(moduleName: string, methodName: string): string {
-    const seed = `${moduleName}.${methodName}:${Date.now()}:${Math.random()}`;
-    const digest = crypto.createHash('sha1').update(seed).digest('hex').slice(0, 6).toUpperCase();
+  private generateConfirmationToken(_moduleName: string, _methodName: string): string {
+    const digest = crypto.randomBytes(3).toString('hex').toUpperCase();
     return `CONFIRM-${digest}`;
   }
 
@@ -174,7 +176,8 @@ export class Interceptor {
     intervention?: InterventionMetadata
   ): string {
     const strict = intervention?.requiresExplicitConfirmation === true;
-    const summary = intervention?.actionSummary || `${moduleName}.${methodName}()`;
+    const rawSummary = intervention?.actionSummary || `${moduleName}.${methodName}()`;
+    const summary = sanitizeForPrompt(stripControlChars(rawSummary));
     const token = intervention?.confirmationToken || 'CONFIRM';
 
     const screenshotInstruction = intervention?.recommendScreenshotReview

@@ -9,6 +9,7 @@ import { logger } from '../core/Logger';
 import { detectBrowserChallenge } from '../core/BrowserChallengeDetector';
 import { scoreIrreversibility, IrreversibilityAssessment } from '../core/IrreversibilityScorer';
 import { MemoryRiskForecaster, MemoryRiskAssessment } from '../core/MemoryRiskForecaster';
+import { sanitizeForPrompt, stripControlChars } from '../core/InputSanitizer';
 import { InterventionMetadata } from '../types';
 import { BrowserSessionStore } from '../storage/BrowserSessionStore';
 
@@ -178,7 +179,7 @@ function buildInterventionMetadata(
 
   if (irreversibility.score >= EXPLICIT_CONFIRM_IRREVERSIBILITY_THRESHOLD) {
     intervention.requiresExplicitConfirmation = true;
-    intervention.actionSummary = irreversibility.summary;
+    intervention.actionSummary = sanitizeForPrompt(stripControlChars(irreversibility.summary));
     intervention.interventionReason =
       'Irreversible action detected. Requires explicit token confirmation, not YES/NO.';
   }
@@ -200,7 +201,7 @@ function buildInterventionMetadata(
       ? `Predicted N+1 danger paths: ${topPaths}.`
       : 'Memory drift indicates unsafe next-step trajectory.';
 
-    intervention.actionSummary = memoryRisk.summary;
+    intervention.actionSummary = sanitizeForPrompt(stripControlChars(memoryRisk.summary));
 
     if (memoryRisk.overallRisk >= EXPLICIT_CONFIRM_MEMORY_THRESHOLD) {
       intervention.requiresExplicitConfirmation = true;
