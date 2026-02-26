@@ -60,14 +60,14 @@ ClawReins solves this by hooking into OpenClaw's `before_tool_call` plugin event
 ### Installation
 
 ```bash
-# Install globally
-npm install -g clawreins
+# Install plugin
+openclaw plugins install clawreins@beta
 
-# Run interactive setup
-clawreins init
+# Run setup
+node ~/.openclaw/extensions/clawreins/dist/cli/index.js init
 
-# Restart OpenClaw
-openclaw restart
+# Reload gateway
+openclaw gateway restart
 ```
 
 Done! ClawReins is now protecting your OpenClaw instance.
