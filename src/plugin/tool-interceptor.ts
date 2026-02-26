@@ -9,6 +9,7 @@ import { logger } from '../core/Logger';
 import { detectBrowserChallenge } from '../core/BrowserChallengeDetector';
 import { scoreIrreversibility, IrreversibilityAssessment } from '../core/IrreversibilityScorer';
 import { MemoryRiskForecaster, MemoryRiskAssessment } from '../core/MemoryRiskForecaster';
+import { trustRateLimiter } from '../core/TrustRateLimiter';
 import { InterventionMetadata } from '../types';
 import { BrowserSessionStore } from '../storage/BrowserSessionStore';
 
@@ -125,7 +126,8 @@ export function createToolCallHook(
       toolName,
       params,
       irreversibility,
-      memoryRisk
+      memoryRisk,
+      sessionKeyForMemory
     );
 
     try {
@@ -146,7 +148,8 @@ function buildInterventionMetadata(
   toolName: string,
   params: Record<string, unknown>,
   irreversibility: IrreversibilityAssessment,
-  memoryRisk: MemoryRiskAssessment
+  memoryRisk: MemoryRiskAssessment,
+  sessionKey: string
 ): InterventionMetadata | undefined {
   const intervention: InterventionMetadata = {};
 
@@ -205,6 +208,23 @@ function buildInterventionMetadata(
     if (memoryRisk.overallRisk >= EXPLICIT_CONFIRM_MEMORY_THRESHOLD) {
       intervention.requiresExplicitConfirmation = true;
     }
+  }
+
+  // Cooldown escalation: tighten posture after repeated denials.
+  const escalationState = trustRateLimiter.getState(sessionKey);
+  if (escalationState.level >= 1) {
+    intervention.forceAsk = true;
+    intervention.cooldownLevel = escalationState.level;
+    const cooldownLine =
+      `Cooldown escalation level ${escalationState.level}: ` +
+      `${escalationState.denialCount} denials in the last ${Math.round(escalationState.windowMs / 60_000)} minutes.`;
+    intervention.interventionReason = intervention.interventionReason
+      ? `${intervention.interventionReason} ${cooldownLine}`
+      : cooldownLine;
+  }
+  if (escalationState.level >= 2) {
+    intervention.requiresExplicitConfirmation = true;
+    intervention.actionSummary = intervention.actionSummary || `${toolName}(...)`;
   }
 
   if (Object.keys(intervention).length === 0) {
@@ -287,6 +307,7 @@ function handleRespondTool(
 
   if (decision === 'no') {
     const count = approvalQueue.deny(sessionKey);
+    trustRateLimiter.recordDenial(sessionKey);
     logger.info(`[${CLAWREINS_RESPOND_TOOL}] DENIED`, { sessionKey, count });
     return { block: true, blockReason: 'Denied. Do NOT retry the blocked tool.' };
   }
