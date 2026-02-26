@@ -148,6 +148,17 @@ export class Arbitrator {
   }
 
   private displayContext(context: ExecutionContext): void {
+    if (context.intervention?.cooldownLevel) {
+      const level = context.intervention.cooldownLevel;
+      const label = level >= 2 ? 'RESTRICTED' : 'HEIGHTENED';
+      console.log(
+        chalk.bgYellow.black.bold(
+          `   COOLDOWN ACTIVE: Level ${level} (${label}) — repeated denials detected   `
+        )
+      );
+      console.log('');
+    }
+
     console.log(chalk.bold.cyan('📦 Module:'), chalk.white(context.moduleName));
     console.log(chalk.bold.cyan('🔧 Method:'), chalk.white(context.methodName));
 

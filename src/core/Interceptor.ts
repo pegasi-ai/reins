@@ -15,6 +15,7 @@ import { DEFAULT_POLICY } from '../config';
 import { Arbitrator } from './Arbitrator';
 import { DecisionLog, DecisionRecord } from '../storage/DecisionLog';
 import { StatsTracker } from '../storage/StatsTracker';
+import { trustRateLimiter } from './TrustRateLimiter';
 import { logger } from './Logger';
 import chalk from 'chalk';
 
@@ -282,6 +283,12 @@ export class Interceptor {
 
         const approved = await this.arbitrator.judge(context);
         const decisionTime = Date.now() - startTime;
+
+        // Record TTY denials for cooldown escalation.
+        // Channel denials are recorded separately in handleRespondTool.
+        if (!approved && process.stdin.isTTY) {
+          trustRateLimiter.recordDenial(sessionKey || 'tty');
+        }
 
         await this.logDecision({
           timestamp: new Date().toISOString(),

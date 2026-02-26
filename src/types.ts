@@ -52,6 +52,8 @@ export interface InterventionMetadata {
    * use vision reasoning before asking for approval.
    */
   recommendScreenshotReview?: boolean;
+  /** Current cooldown escalation level (0=normal, 1=heightened, 2=restricted). */
+  cooldownLevel?: number;
 }
 
 /**
