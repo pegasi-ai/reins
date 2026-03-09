@@ -230,3 +230,34 @@ test('clawreins scan --fix --yes creates a backup and applies supported remediat
   assert.ok(existsSync(backupRoot), 'expected backup directory to exist');
   assert.ok(readdirSync(backupRoot).length > 0, 'expected at least one timestamped backup');
 });
+
+test('clawreins scan --html does not crash when the system opener is unavailable', () => {
+  const homeDir = makeTempRoot('clawreins-scan-html-home-');
+  const openclawHome = path.join(homeDir, '.openclaw');
+  const openclawConfig = path.join(openclawHome, 'openclaw.json');
+
+  writeJson(openclawConfig, {
+    gateway: { host: '127.0.0.1' },
+    auth: { token: '${GATEWAY_TOKEN}' },
+    browser: { headless: true },
+    tools: {
+      exec: {
+        safeBins: ['ls'],
+      },
+    },
+    sandbox: true,
+    rateLimit: { maxRequests: 10 },
+  });
+  chmodSync(openclawConfig, 0o600);
+
+  const result = runCli(['scan', '--html'], {
+    HOME: homeDir,
+    OPENCLAW_HOME: openclawHome,
+    PATH: '',
+  });
+
+  assert.notEqual(result.status, null);
+  assert.match(result.stdout, /HTML report:/);
+  assert.match(result.stdout, /Unable to open HTML report automatically\./);
+  assert.ok(existsSync(path.join(openclawHome, 'clawreins', 'scan-report.html')));
+});

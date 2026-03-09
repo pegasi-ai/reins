@@ -172,19 +172,27 @@ async function writeHtmlReport(report: ScanReport): Promise<string> {
 function openHtmlReport(reportPath: string): void {
   try {
     if (process.platform === 'darwin') {
-      spawn('open', [reportPath], { detached: true, stdio: 'ignore' }).unref();
+      spawnDetached('open', [reportPath]);
       return;
     }
 
     if (process.platform === 'win32') {
-      spawn('cmd', ['/c', 'start', '', reportPath], { detached: true, stdio: 'ignore' }).unref();
+      spawnDetached('cmd', ['/c', 'start', '', reportPath]);
       return;
     }
 
-    spawn('xdg-open', [reportPath], { detached: true, stdio: 'ignore' }).unref();
+    spawnDetached('xdg-open', [reportPath]);
   } catch {
     console.log(chalk.yellow('Unable to open HTML report automatically.'));
   }
+}
+
+function spawnDetached(command: string, args: string[]): void {
+  const child = spawn(command, args, { detached: true, stdio: 'ignore' });
+  child.on('error', () => {
+    console.log(chalk.yellow('Unable to open HTML report automatically.'));
+  });
+  child.unref();
 }
 
 function buildHtmlReport(report: ScanReport): string {
