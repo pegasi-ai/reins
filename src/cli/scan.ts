@@ -40,10 +40,10 @@ export async function scanCommand(options: ScanCommandOptions): Promise<void> {
     }
 
     renderTerminalReport(report);
+    const initialPlan = await scanner.planFixes();
 
     if (options.fix) {
-      const plan = await scanner.planFixes();
-      const fixResult = await maybeApplyFixes(scanner, plan, options.yes === true);
+      const fixResult = await maybeApplyFixes(scanner, initialPlan, options.yes === true);
 
       if (fixResult) {
         console.log('');
@@ -55,6 +55,8 @@ export async function scanCommand(options: ScanCommandOptions): Promise<void> {
         console.log(`  ${renderVerdict(report.verdict)}`);
         console.log('');
       }
+    } else {
+      await maybeOfferFix(scanner, initialPlan);
     }
 
     const reportPath = await writeHtmlReport(report);
@@ -109,6 +111,48 @@ async function maybeApplyFixes(
   }
 
   return result;
+}
+
+async function maybeOfferFix(scanner: SecurityScanner, actions: FixAction[]): Promise<void> {
+  if (actions.length === 0) {
+    return;
+  }
+
+  console.log(chalk.bold('Auto-Fix Available:'));
+  console.log(`  ${chalk.dim('Run `clawreins scan --fix` to apply supported remediations.')}`);
+
+  if (!process.stdin.isTTY) {
+    console.log('');
+    return;
+  }
+
+  const { applyFixes } = await inquirer.prompt([
+    {
+      type: 'confirm',
+      name: 'applyFixes',
+      message: 'Apply supported auto-fixes now?',
+      default: false,
+    },
+  ]);
+
+  if (!applyFixes) {
+    console.log('');
+    return;
+  }
+
+  const fixResult = await maybeApplyFixes(scanner, actions, true);
+  if (!fixResult) {
+    return;
+  }
+
+  console.log('');
+  console.log(chalk.bold.cyan('Post-Fix Scan'));
+  console.log(chalk.cyan('──────────────────────────────────────────'));
+  const report = await scanner.run();
+  renderChecksOnly(report);
+  console.log(chalk.bold('Post-Fix Verdict:'));
+  console.log(`  ${renderVerdict(report.verdict)}`);
+  console.log('');
 }
 
 async function confirmFix(): Promise<boolean> {
@@ -166,8 +210,7 @@ function renderVerdict(verdict: ScanReport['verdict']): string {
 }
 
 async function writeHtmlReport(report: ScanReport): Promise<string> {
-  const openclawHome = process.env.OPENCLAW_HOME || path.join(os.homedir(), '.openclaw');
-  const outputDir = path.join(openclawHome, 'clawreins');
+  const outputDir = path.join(os.homedir(), 'Downloads');
   const outputPath = path.join(outputDir, 'scan-report.html');
 
   await fs.ensureDir(outputDir);

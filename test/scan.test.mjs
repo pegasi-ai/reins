@@ -224,11 +224,12 @@ test('clawreins scan writes an HTML report and prints a file link by default', (
     OPENCLAW_HOME: openclawHome,
   });
 
+  const reportPath = path.join(homeDir, 'Downloads', 'scan-report.html');
   assert.notEqual(result.status, null);
   assert.match(result.stdout, /HTML Report:/);
   assert.match(result.stdout, /Saved to:/);
   assert.match(result.stdout, /Open: file:\/\//);
-  assert.ok(existsSync(path.join(openclawHome, 'clawreins', 'scan-report.html')));
+  assert.ok(existsSync(reportPath));
 });
 
 test('clawreins scan --fix --yes creates a backup and applies supported remediations', () => {
@@ -264,6 +265,7 @@ test('clawreins scan --fix --yes creates a backup and applies supported remediat
   const backupRoot = path.join(homeDir, '.scan-backup');
   assert.ok(existsSync(backupRoot), 'expected backup directory to exist');
   assert.ok(readdirSync(backupRoot).length > 0, 'expected at least one timestamped backup');
+  assert.ok(existsSync(path.join(homeDir, 'Downloads', 'scan-report.html')));
 });
 
 test('clawreins scan --html does not crash when the system opener is unavailable', () => {
@@ -291,10 +293,11 @@ test('clawreins scan --html does not crash when the system opener is unavailable
     PATH: '',
   });
 
+  const reportPath = path.join(homeDir, 'Downloads', 'scan-report.html');
   assert.notEqual(result.status, null);
   assert.match(result.stdout, /HTML Report:/);
   assert.match(result.stdout, /Open: file:\/\//);
   assert.match(result.stdout, /Auto-open: requested/);
   assert.match(result.stdout, /Auto-open unavailable\. Use the file link above\./);
-  assert.ok(existsSync(path.join(openclawHome, 'clawreins', 'scan-report.html')));
+  assert.ok(existsSync(reportPath));
 });
