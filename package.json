@@ -1,6 +1,6 @@
 {
   "name": "clawreins",
-  "version": "0.0.3-beta.7",
+  "version": "0.0.3-beta.8",
   "description": "ClawReins is the intervention layer for OpenClaw.",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
