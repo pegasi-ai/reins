@@ -79,8 +79,10 @@ program
 program
   .command('scan')
   .description('Audit the local OpenClaw installation for security misconfigurations')
+  .option('--fix', 'Create a backup and apply supported remediations')
   .option('--html', 'Write and open an HTML scan report')
   .option('--json', 'Print the raw scan report as JSON')
+  .option('--yes', 'Skip the confirmation prompt when using --fix')
   .action(scanCommand);
 
 program.parse();

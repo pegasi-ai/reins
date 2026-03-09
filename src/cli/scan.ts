@@ -4,15 +4,18 @@
 
 import { spawn } from 'child_process';
 import fs from 'fs-extra';
+import inquirer from 'inquirer';
 import chalk from 'chalk';
 import os from 'os';
 import path from 'path';
-import { SecurityScanner, ScanCheck, ScanReport } from '../core/SecurityScanner';
+import { FixAction, FixResult, ScanCheck, ScanReport, SecurityScanner } from '../core/SecurityScanner';
 import { logger } from '../core/Logger';
 
 interface ScanCommandOptions {
+  fix?: boolean;
   html?: boolean;
   json?: boolean;
+  yes?: boolean;
 }
 
 const STATUS_STYLES = {
@@ -23,8 +26,12 @@ const STATUS_STYLES = {
 
 export async function scanCommand(options: ScanCommandOptions): Promise<void> {
   try {
+    if (options.fix && options.json) {
+      throw new Error('--fix cannot be combined with --json');
+    }
+
     const scanner = new SecurityScanner();
-    const report = await scanner.run();
+    let report = await scanner.run();
 
     if (options.json) {
       console.log(JSON.stringify(report, null, 2));
@@ -33,6 +40,19 @@ export async function scanCommand(options: ScanCommandOptions): Promise<void> {
     }
 
     renderTerminalReport(report);
+
+    if (options.fix) {
+      const plan = await scanner.planFixes();
+      const fixResult = await maybeApplyFixes(scanner, plan, options.yes === true);
+
+      if (fixResult) {
+        console.log('');
+        console.log(chalk.bold.cyan('Post-Fix Scan'));
+        console.log(chalk.cyan('──────────────────────────────────────────'));
+        report = await scanner.run();
+        renderChecksOnly(report);
+      }
+    }
 
     if (options.html) {
       const reportPath = await writeHtmlReport(report);
@@ -48,15 +68,71 @@ export async function scanCommand(options: ScanCommandOptions): Promise<void> {
   }
 }
 
+async function maybeApplyFixes(
+  scanner: SecurityScanner,
+  actions: FixAction[],
+  assumeYes: boolean
+): Promise<FixResult | null> {
+  if (actions.length === 0) {
+    console.log(chalk.green('No auto-fixable issues detected.'));
+    return null;
+  }
+
+  console.log('');
+  console.log(chalk.bold('Auto-Fix Plan:'));
+  actions.forEach((action) => {
+    console.log(`  ${chalk.cyan('•')} ${action.description}`);
+  });
+
+  const confirmed = assumeYes ? true : await confirmFix();
+  if (!confirmed) {
+    console.log(chalk.dim('Fix cancelled.'));
+    return null;
+  }
+
+  const result = await scanner.applyFixes();
+
+  console.log('');
+  console.log(chalk.green(`Applied ${result.appliedActions.length} fix(es).`));
+  if (result.backupPath) {
+    console.log(chalk.dim(`Backup: ${result.backupPath}`));
+  }
+  if (result.touchedFiles.length > 0) {
+    console.log(chalk.dim(`Updated: ${result.touchedFiles.join(', ')}`));
+  }
+
+  return result;
+}
+
+async function confirmFix(): Promise<boolean> {
+  if (!process.stdin.isTTY) {
+    throw new Error('Fix mode requires --yes when stdin is not interactive');
+  }
+
+  const { confirmed } = await inquirer.prompt([
+    {
+      type: 'confirm',
+      name: 'confirmed',
+      message: 'Create a backup and apply the planned fixes?',
+      default: false,
+    },
+  ]);
+
+  return confirmed;
+}
+
 function renderTerminalReport(report: ScanReport): void {
   console.log('');
   console.log(chalk.bold.cyan('🦞 ClawReins Security Scan'));
   console.log(chalk.cyan('──────────────────────────────────────────'));
+  renderChecksOnly(report);
+}
 
+function renderChecksOnly(report: ScanReport): void {
   report.checks.forEach((check) => {
     const style = STATUS_STYLES[check.status];
     const statusText = style.color(check.status.padEnd(5));
-    const idText = chalk.white(check.id.padEnd(24));
+    const idText = chalk.white(check.id.padEnd(28));
     console.log(`${style.icon} ${statusText} ${idText} ${check.message}`);
 
     if (check.remediation) {
@@ -88,21 +164,19 @@ async function writeHtmlReport(report: ScanReport): Promise<string> {
   const outputPath = path.join(outputDir, 'scan-report.html');
 
   await fs.ensureDir(outputDir);
-  await fs.writeFile(outputPath, buildHtmlReport(report), 'utf-8');
+  await fs.writeFile(outputPath, buildHtmlReport(report), 'utf8');
 
   return outputPath;
 }
 
 function openHtmlReport(reportPath: string): void {
-  const platform = process.platform;
-
   try {
-    if (platform === 'darwin') {
+    if (process.platform === 'darwin') {
       spawn('open', [reportPath], { detached: true, stdio: 'ignore' }).unref();
       return;
     }
 
-    if (platform === 'win32') {
+    if (process.platform === 'win32') {
       spawn('cmd', ['/c', 'start', '', reportPath], { detached: true, stdio: 'ignore' }).unref();
       return;
     }
@@ -114,13 +188,10 @@ function openHtmlReport(reportPath: string): void {
 }
 
 function buildHtmlReport(report: ScanReport): string {
-  const checks = report.checks
-    .map((check) => renderHtmlCheck(check))
-    .join('\n');
-  const scoreBar = Array.from({ length: report.total }, (_, index) => {
-    const filled = index < report.score;
-    return `<span class="seg ${filled ? 'filled' : ''}"></span>`;
-  }).join('');
+  const checks = report.checks.map((check) => renderHtmlCheck(check)).join('\n');
+  const scoreBar = Array.from({ length: report.total }, (_, index) =>
+    `<span class="seg ${index < report.score ? 'filled' : ''}"></span>`
+  ).join('');
   const verdictClass = report.verdict === 'SECURE' ? 'pass' : report.verdict === 'NEEDS ATTENTION' ? 'warn' : 'fail';
 
   return `<!DOCTYPE html>
@@ -130,15 +201,12 @@ function buildHtmlReport(report: ScanReport): string {
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>ClawReins Security Scan</title>
   <style>
-    :root{color-scheme:dark;}
-    *{box-sizing:border-box}body{margin:0;padding:32px;background:#0d1117;color:#c9d1d9;font:16px/1.5 ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,"Liberation Mono","Courier New",system-ui,monospace}
-    main{max-width:900px;margin:0 auto}.muted{color:#8b949e}.pass{color:#3fb950}.warn{color:#d29922}.fail{color:#f85149}
-    .panel{border:1px solid #30363d;border-radius:14px;background:#161b22;padding:24px;box-shadow:0 0 0 1px rgba(255,255,255,.02) inset}
-    .header{display:flex;justify-content:space-between;gap:16px;align-items:flex-start;flex-wrap:wrap}.badge{display:inline-block;padding:6px 10px;border-radius:999px;font-weight:700;border:1px solid currentColor}
-    .score{margin:20px 0 8px;display:flex;gap:8px}.seg{height:12px;flex:1;border-radius:999px;background:#21262d;border:1px solid #30363d}.seg.filled{background:#3fb950;border-color:#3fb950}
+    :root{color-scheme:dark}*{box-sizing:border-box}body{margin:0;padding:32px;background:#0d1117;color:#c9d1d9;font:16px/1.5 ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,"Liberation Mono","Courier New",system-ui,monospace}
+    main{max-width:960px;margin:0 auto}.pass{color:#3fb950}.warn{color:#d29922}.fail{color:#f85149}.muted{color:#8b949e}
+    .panel{border:1px solid #30363d;border-radius:14px;background:#161b22;padding:24px}.header{display:flex;justify-content:space-between;gap:16px;align-items:flex-start;flex-wrap:wrap}
+    .badge{display:inline-block;padding:6px 10px;border-radius:999px;border:1px solid currentColor;font-weight:700}.score{display:flex;gap:8px;margin:18px 0}.seg{height:12px;flex:1;border-radius:999px;background:#21262d;border:1px solid #30363d}.seg.filled{background:#3fb950;border-color:#3fb950}
     .checks{display:grid;gap:14px;margin-top:24px}.check{border:1px solid #30363d;border-radius:12px;padding:16px;background:#0d1117}.row{display:flex;gap:12px;align-items:center;flex-wrap:wrap}
-    .id{color:#8b949e}.msg{margin-top:8px}.fix{margin-top:8px;color:#8b949e}a{color:#58a6ff;text-decoration:none}a:hover{text-decoration:underline}
-    footer{margin-top:24px;color:#8b949e}
+    .msg{margin-top:8px}.fix{margin-top:8px;color:#8b949e}a{color:#58a6ff;text-decoration:none}a:hover{text-decoration:underline}footer{margin-top:24px;color:#8b949e}
   </style>
 </head>
 <body>
@@ -156,9 +224,7 @@ function buildHtmlReport(report: ScanReport): string {
       <div class="checks">
 ${checks}
       </div>
-      <footer>
-        Secured by <a href="https://github.com/pegasi-ai/clawreins">ClawReins</a>
-      </footer>
+      <footer>Secured by <a href="https://github.com/pegasi-ai/clawreins">ClawReins</a></footer>
     </section>
   </main>
 </body>
@@ -167,9 +233,7 @@ ${checks}
 
 function renderHtmlCheck(check: ScanCheck): string {
   const statusClass = check.status === 'PASS' ? 'pass' : check.status === 'WARN' ? 'warn' : 'fail';
-  const remediation = check.remediation
-    ? `<div class="fix">Fix: ${escapeHtml(check.remediation)}</div>`
-    : '';
+  const remediation = check.remediation ? `<div class="fix">Fix: ${escapeHtml(check.remediation)}</div>` : '';
 
   return `        <article class="check">
           <div class="row">
