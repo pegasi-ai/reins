@@ -200,6 +200,37 @@ test('clawreins scan --json returns 13 checks and an EXPOSED exit code for unsaf
   assert.equal(getCheck(payload, 'DEFAULT_WEAK_CREDENTIALS').status, 'FAIL');
 });
 
+test('clawreins scan writes an HTML report and prints a file link by default', () => {
+  const homeDir = makeTempRoot('clawreins-scan-default-html-home-');
+  const openclawHome = path.join(homeDir, '.openclaw');
+  const openclawConfig = path.join(openclawHome, 'openclaw.json');
+
+  writeJson(openclawConfig, {
+    gateway: { host: '127.0.0.1' },
+    auth: { token: '${GATEWAY_TOKEN}' },
+    browser: { headless: true },
+    tools: {
+      exec: {
+        safeBins: ['ls'],
+      },
+    },
+    sandbox: true,
+    rateLimit: { maxRequests: 10 },
+  });
+  chmodSync(openclawConfig, 0o600);
+
+  const result = runCli(['scan'], {
+    HOME: homeDir,
+    OPENCLAW_HOME: openclawHome,
+  });
+
+  assert.notEqual(result.status, null);
+  assert.match(result.stdout, /HTML Report:/);
+  assert.match(result.stdout, /Saved to:/);
+  assert.match(result.stdout, /Open: file:\/\//);
+  assert.ok(existsSync(path.join(openclawHome, 'clawreins', 'scan-report.html')));
+});
+
 test('clawreins scan --fix --yes creates a backup and applies supported remediations', () => {
   const homeDir = makeTempRoot('clawreins-scan-fix-home-');
   const openclawHome = path.join(homeDir, '.openclaw');
@@ -218,7 +249,11 @@ test('clawreins scan --fix --yes creates a backup and applies supported remediat
     OPENCLAW_HOME: openclawHome,
   });
 
+  assert.match(result.stdout, /Fix Results:/);
   assert.match(result.stdout, /Applied \d+ fix\(es\)\./);
+  assert.match(result.stdout, /Backup created:/);
+  assert.match(result.stdout, /Post-Fix Verdict:/);
+  assert.match(result.stdout, /Open: file:\/\//);
 
   const updatedConfig = JSON.parse(readFileSync(openclawConfig, 'utf8'));
   assert.equal(updatedConfig.gateway.host, '127.0.0.1');
@@ -257,7 +292,9 @@ test('clawreins scan --html does not crash when the system opener is unavailable
   });
 
   assert.notEqual(result.status, null);
-  assert.match(result.stdout, /HTML report:/);
-  assert.match(result.stdout, /Unable to open HTML report automatically\./);
+  assert.match(result.stdout, /HTML Report:/);
+  assert.match(result.stdout, /Open: file:\/\//);
+  assert.match(result.stdout, /Auto-open: requested/);
+  assert.match(result.stdout, /Auto-open unavailable\. Use the file link above\./);
   assert.ok(existsSync(path.join(openclawHome, 'clawreins', 'scan-report.html')));
 });

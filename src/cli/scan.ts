@@ -51,12 +51,16 @@ export async function scanCommand(options: ScanCommandOptions): Promise<void> {
         console.log(chalk.cyan('──────────────────────────────────────────'));
         report = await scanner.run();
         renderChecksOnly(report);
+        console.log(chalk.bold('Post-Fix Verdict:'));
+        console.log(`  ${renderVerdict(report.verdict)}`);
+        console.log('');
       }
     }
 
+    const reportPath = await writeHtmlReport(report);
+    renderHtmlReportSummary(reportPath, options.html === true);
+
     if (options.html) {
-      const reportPath = await writeHtmlReport(report);
-      console.log(chalk.dim(`HTML report: ${reportPath}`));
       openHtmlReport(reportPath);
     }
 
@@ -74,7 +78,9 @@ async function maybeApplyFixes(
   assumeYes: boolean
 ): Promise<FixResult | null> {
   if (actions.length === 0) {
-    console.log(chalk.green('No auto-fixable issues detected.'));
+    console.log('');
+    console.log(chalk.bold('Fix Results:'));
+    console.log(`  ${chalk.green('No auto-fixable issues detected.')}`);
     return null;
   }
 
@@ -93,12 +99,13 @@ async function maybeApplyFixes(
   const result = await scanner.applyFixes();
 
   console.log('');
-  console.log(chalk.green(`Applied ${result.appliedActions.length} fix(es).`));
+  console.log(chalk.bold('Fix Results:'));
+  console.log(`  ${chalk.green(`Applied ${result.appliedActions.length} fix(es).`)}`);
   if (result.backupPath) {
-    console.log(chalk.dim(`Backup: ${result.backupPath}`));
+    console.log(`  ${chalk.dim(`Backup created: ${result.backupPath}`)}`);
   }
   if (result.touchedFiles.length > 0) {
-    console.log(chalk.dim(`Updated: ${result.touchedFiles.join(', ')}`));
+    console.log(`  ${chalk.dim(`Updated files: ${result.touchedFiles.join(', ')}`)}`);
   }
 
   return result;
@@ -190,9 +197,18 @@ function openHtmlReport(reportPath: string): void {
 function spawnDetached(command: string, args: string[]): void {
   const child = spawn(command, args, { detached: true, stdio: 'ignore' });
   child.on('error', () => {
-    console.log(chalk.yellow('Unable to open HTML report automatically.'));
+    console.log(chalk.yellow('  Auto-open unavailable. Use the file link above.'));
   });
   child.unref();
+}
+
+function renderHtmlReportSummary(reportPath: string, autoOpenRequested: boolean): void {
+  console.log(chalk.bold('HTML Report:'));
+  console.log(`  ${chalk.dim(`Saved to: ${reportPath}`)}`);
+  console.log(`  ${chalk.dim(`Open: ${toFileUrl(reportPath)}`)}`);
+  if (autoOpenRequested) {
+    console.log(`  ${chalk.dim('Auto-open: requested')}`);
+  }
 }
 
 function buildHtmlReport(report: ScanReport): string {
@@ -260,6 +276,15 @@ function escapeHtml(value: string): string {
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;')
     .replace(/'/g, '&#39;');
+}
+
+function toFileUrl(reportPath: string): string {
+  const normalized = process.platform === 'win32'
+    ? reportPath.replace(/\\/g, '/')
+    : reportPath;
+  return normalized.startsWith('/')
+    ? `file://${normalized}`
+    : `file:///${normalized}`;
 }
 
 function exitCodeFor(report: ScanReport): 0 | 1 | 2 {
