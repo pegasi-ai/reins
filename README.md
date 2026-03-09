@@ -240,6 +240,8 @@ clawreins reset       # Reset statistics
 clawreins disable     # Temporarily disable
 clawreins enable      # Re-enable
 clawreins toolshield-sync  # Sync ToolShield guardrails into AGENTS.md
+clawreins upgrade     # Reinstall latest clawreins@beta in OpenClaw + restart gateway
+clawreins update      # Alias for upgrade
 ```
 
 ## Example: View Audit Trail

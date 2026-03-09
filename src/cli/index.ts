@@ -12,6 +12,8 @@ import { auditCommand } from './commands/audit';
 import { resetCommand } from './commands/reset';
 import { disableCommand, enableCommand } from './commands/toggle';
 import { toolShieldSyncCommand } from './commands/toolshield-sync';
+import { upgradeCommand } from './commands/upgrade';
+import { scanCommand } from './scan';
 
 const program = new Command();
 
@@ -61,5 +63,24 @@ program
   .option('--no-install', 'Do not auto-install ToolShield if missing')
   .option('--append', 'Append without unloading existing ToolShield section')
   .action(toolShieldSyncCommand);
+
+// Upgrade/reinstall ClawReins plugin in OpenClaw
+program
+  .command('upgrade')
+  .alias('update')
+  .description('Upgrade ClawReins plugin in OpenClaw (reinstall + restart)')
+  .option('--tag <tag>', 'NPM dist-tag to install', 'beta')
+  .option('--version <version>', 'Exact version to install (overrides --tag)')
+  .option('--configure', 'Run clawreins configure after install')
+  .option('--no-restart', 'Skip openclaw gateway restart')
+  .action(upgradeCommand);
+
+// Scan OpenClaw installation for common security misconfigurations
+program
+  .command('scan')
+  .description('Audit the local OpenClaw installation for security misconfigurations')
+  .option('--html', 'Write and open an HTML scan report')
+  .option('--json', 'Print the raw scan report as JSON')
+  .action(scanCommand);
 
 program.parse();
