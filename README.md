@@ -40,7 +40,63 @@ Gmail automation is gated: ClawReins blocks destructive inbox actions unless you
 
 ## Intercept Example
 
-![ClawReins intercept example](./intercept_example.pmg)
+![ClawReins intercept example](./public/intercept_example.png)
+
+## Security Scan
+
+![ClawReins security scan](./public/security_scan.png)
+
+`clawreins scan` audits a local OpenClaw installation for high-signal security misconfigurations, writes an HTML report to `~/Downloads/scan-report.html`, and prints a `file://` link directly in the terminal.
+
+Quick usage:
+
+```bash
+# Run the 13-check audit and save the HTML report
+clawreins scan
+
+# Save the report and try to open it automatically
+clawreins scan --html
+
+# Machine-readable output for CI
+clawreins scan --json
+
+# Apply supported auto-fixes after confirmation
+clawreins scan --fix
+
+# Apply supported auto-fixes without prompting
+clawreins scan --fix --yes
+```
+
+Auto-fix currently supports:
+- Rebinding gateway host from `0.0.0.0` to `127.0.0.1`
+- Tightening config file permissions to `600`
+- Injecting a default `tools.exec.safeBins` allowlist
+- Disabling `authBypass` / `skipAuth` / `disableAuth` style flags
+
+Before any fix is applied, ClawReins creates a timestamped backup in `~/.scan-backup/`.
+
+### Security Checks
+
+| Check | Severity | Detects | Auto-fix |
+|------|----------|---------|----------|
+| `GATEWAY_BINDING` | Critical | Gateway listening on `0.0.0.0` or missing localhost binding | Yes |
+| `API_KEYS_EXPOSURE` | Critical | Plaintext API keys, tokens, passwords, or secrets stored directly in config files | No |
+| `FILE_PERMISSIONS` | Critical | Config files readable by group or other users instead of `600` | Yes |
+| `HTTPS_TLS` | Warning | Missing HTTPS/TLS or certificate-related configuration | No |
+| `SHELL_COMMAND_ALLOWLIST` | Critical | Missing `safeBins` or equivalent shell allowlist / unrestricted shell execution | Yes |
+| `SENSITIVE_DIRECTORIES` | Warning | Agent environment can still reach directories like `~/.ssh`, `~/.gnupg`, `~/.aws`, or `/etc/shadow` | No |
+| `WEBHOOK_AUTH` | Warning | Webhook endpoints configured without auth tokens or shared secrets | No |
+| `SANDBOX_ISOLATION` | Warning | No Docker or sandbox isolation detected | No |
+| `DEFAULT_WEAK_CREDENTIALS` | Critical | Default, weak, undefined, or missing gateway credentials | No |
+| `RATE_LIMITING` | Warning | No gateway throttling or rate limit configuration | No |
+| `NODEJS_VERSION` | Critical | Node.js versions affected by CVE-2026-21636 permission-model bypass window | No |
+| `CONTROL_UI_AUTH` | Critical | Control UI authentication bypass flags enabled | Yes |
+| `BROWSER_UNSANDBOXED` | Critical | Browser skill config missing `headless: true` or `sandbox: true` protection | No |
+
+Exit codes:
+- `0` = `SECURE`
+- `1` = `NEEDS ATTENTION`
+- `2` = `EXPOSED`
 
 ## Why?
 
@@ -57,6 +113,7 @@ ClawReins solves this by hooking into OpenClaw's `before_tool_call` plugin event
 - ♻️ **Persistent Browser Sessions** - Reuses encrypted local auth/session state across agent runs
 - 💬 **Channel Support** - Works in terminal, WhatsApp, Telegram via `clawreins_respond` tool
 - 📊 **Full Audit Trail** - Every decision logged (JSON Lines format)
+- 🔎 **Security Scan + Auto-Fix** - Audits 13 common OpenClaw misconfigurations and can remediate the safe subset with backups
 - ⚡ **Zero Latency** - Runs in-process, no external policy API calls
 
 ## Destructive Action Intercept (Pre-Execution)
@@ -242,6 +299,8 @@ clawreins enable      # Re-enable
 clawreins toolshield-sync  # Sync ToolShield guardrails into AGENTS.md
 clawreins upgrade     # Reinstall latest clawreins@beta in OpenClaw + restart gateway
 clawreins update      # Alias for upgrade
+clawreins scan        # Run 13 security checks and save an HTML report
+clawreins scan --fix  # Backup config and apply supported remediations
 ```
 
 ## Example: View Audit Trail
