@@ -473,6 +473,148 @@ test('clawreins scan --monitor can invoke an alert command when drift is detecte
   assert.ok(existsSync(alertOutput));
   assert.match(readFileSync(alertOutput, 'utf8'), /CONTROL_UI_AUTH: PASS -> FAIL/);
 });
+
+test('clawreins scan --monitor treats newly introduced unhealthy checks as drift', async () => {
+  const homeDir = makeTempRoot('clawreins-scan-monitor-new-check-home-');
+  const openclawHome = path.join(homeDir, '.openclaw');
+  const openclawConfig = path.join(openclawHome, 'openclaw.json');
+  const statePath = path.join(openclawHome, 'clawreins', 'scan-state.json');
+
+  writeJson(openclawConfig, {
+    gateway: { host: '0.0.0.0' },
+    auth: { token: '${GATEWAY_TOKEN}' },
+    authBypass: true,
+    browser: { headless: true },
+    tools: {
+      exec: {
+        safeBins: ['ls'],
+      },
+    },
+    sandbox: true,
+    rateLimit: { maxRequests: 10 },
+  });
+  chmodSync(openclawConfig, 0o600);
+
+  const currentReport = await runScanner(openclawHome, homeDir);
+  writeJson(statePath, {
+    savedAt: new Date().toISOString(),
+    report: {
+      ...currentReport,
+      checks: currentReport.checks.filter((check) => check.id !== 'CONTROL_UI_AUTH'),
+    },
+  });
+
+  const result = runCli(['scan', '--monitor'], {
+    HOME: homeDir,
+    OPENCLAW_HOME: openclawHome,
+  });
+
+  assert.equal(result.status, 2, `stderr: ${result.stderr}`);
+  assert.match(result.stdout, /Configuration drift detected\./);
+  assert.match(result.stdout, /CONTROL_UI_AUTH: NEW -> FAIL/);
+});
+
+test('clawreins scan --monitor preserves the scan exit code when the alert command cannot start', () => {
+  const homeDir = makeTempRoot('clawreins-scan-monitor-alert-spawn-home-');
+  const openclawHome = path.join(homeDir, '.openclaw');
+  const openclawConfig = path.join(openclawHome, 'openclaw.json');
+
+  writeJson(openclawConfig, {
+    gateway: { host: '127.0.0.1' },
+    auth: { token: '${GATEWAY_TOKEN}' },
+    browser: { headless: true },
+    tools: {
+      exec: {
+        safeBins: ['ls'],
+      },
+    },
+    sandbox: true,
+    rateLimit: { maxRequests: 10 },
+  });
+  chmodSync(openclawConfig, 0o600);
+
+  runCli(['scan', '--monitor'], {
+    HOME: homeDir,
+    OPENCLAW_HOME: openclawHome,
+  });
+
+  writeJson(openclawConfig, {
+    gateway: { host: '127.0.0.1' },
+    auth: { token: '${GATEWAY_TOKEN}' },
+    authBypass: true,
+    browser: { headless: true },
+    tools: {
+      exec: {
+        safeBins: ['ls'],
+      },
+    },
+    sandbox: true,
+    rateLimit: { maxRequests: 10 },
+  });
+  chmodSync(openclawConfig, 0o600);
+
+  const result = runCli(['scan', '--monitor', '--alert-command', 'echo should-not-run'], {
+    HOME: homeDir,
+    OPENCLAW_HOME: openclawHome,
+    SHELL: path.join(homeDir, 'missing-shell'),
+  });
+
+  assert.equal(result.status, 2, `stderr: ${result.stderr}`);
+  assert.match(result.stdout, /Alert Command:/);
+  assert.match(result.stdout, /Notification command could not be started\./);
+});
+
+test('clawreins scan --monitor times out a hung alert command', () => {
+  const homeDir = makeTempRoot('clawreins-scan-monitor-alert-timeout-home-');
+  const openclawHome = path.join(homeDir, '.openclaw');
+  const openclawConfig = path.join(openclawHome, 'openclaw.json');
+  const alertCommand = `${JSON.stringify(process.execPath)} -e ${JSON.stringify('setTimeout(() => {}, 1000)')}`;
+
+  writeJson(openclawConfig, {
+    gateway: { host: '127.0.0.1' },
+    auth: { token: '${GATEWAY_TOKEN}' },
+    browser: { headless: true },
+    tools: {
+      exec: {
+        safeBins: ['ls'],
+      },
+    },
+    sandbox: true,
+    rateLimit: { maxRequests: 10 },
+  });
+  chmodSync(openclawConfig, 0o600);
+
+  runCli(['scan', '--monitor'], {
+    HOME: homeDir,
+    OPENCLAW_HOME: openclawHome,
+  });
+
+  writeJson(openclawConfig, {
+    gateway: { host: '127.0.0.1' },
+    auth: { token: '${GATEWAY_TOKEN}' },
+    authBypass: true,
+    browser: { headless: true },
+    tools: {
+      exec: {
+        safeBins: ['ls'],
+      },
+    },
+    sandbox: true,
+    rateLimit: { maxRequests: 10 },
+  });
+  chmodSync(openclawConfig, 0o600);
+
+  const result = runCli(['scan', '--monitor', '--alert-command', alertCommand], {
+    HOME: homeDir,
+    OPENCLAW_HOME: openclawHome,
+    CLAWREINS_ALERT_TIMEOUT_MS: '50',
+  });
+
+  assert.equal(result.status, 2, `stderr: ${result.stderr}`);
+  assert.match(result.stdout, /Alert Command:/);
+  assert.match(result.stdout, /Notification command timed out after 50ms\./);
+});
+
 test('clawreins scan --html does not crash when the system opener is unavailable', () => {
   const homeDir = makeTempRoot('clawreins-scan-html-home-');
   const openclawHome = path.join(homeDir, '.openclaw');

@@ -32,12 +32,14 @@ interface DriftComparison {
   verdictWorsened: boolean;
   worsenedChecks: Array<{
     id: string;
-    previousStatus: ScanCheck['status'];
+    previousStatus: ScanCheck['status'] | 'NEW';
     currentStatus: ScanCheck['status'];
     message: string;
   }>;
   previousTimestamp?: string;
 }
+
+const DEFAULT_ALERT_TIMEOUT_MS = 30_000;
 const STATUS_STYLES = {
   PASS: { icon: '✅', color: chalk.green },
   WARN: { icon: '⚠️ ', color: chalk.yellow },
@@ -249,6 +251,7 @@ async function maybeSendMonitorAlert(
 
   const shell = process.env.SHELL || (process.platform === 'win32' ? process.env.COMSPEC || 'cmd.exe' : '/bin/sh');
   const shellArgs = process.platform === 'win32' ? ['/d', '/s', '/c', alertCommand] : ['-c', alertCommand];
+  const timeoutMs = getAlertTimeoutMs();
   const env = {
     ...process.env,
     CLAWREINS_SCAN_ALERT: '1',
@@ -263,19 +266,58 @@ async function maybeSendMonitorAlert(
     CLAWREINS_SCAN_WORSENED_CHECKS: comparison.worsenedChecks.map((change) => change.id).join(','),
   };
 
-  const exitCode = await new Promise<number>((resolve, reject) => {
-    const child = spawn(shell, shellArgs, {
-      env,
-      stdio: 'ignore',
-    });
-
-    child.once('error', reject);
-    child.once('close', (code) => resolve(code ?? 1));
-  });
-
   console.log(chalk.bold('Alert Command:'));
+
+  let exitCode: number;
+  try {
+    exitCode = await new Promise<number>((resolve, reject) => {
+      const child = spawn(shell, shellArgs, {
+        env,
+        stdio: 'ignore',
+      });
+      let settled = false;
+
+      const timer = setTimeout(() => {
+        if (settled) {
+          return;
+        }
+        settled = true;
+        try {
+          child.kill();
+        } catch {
+          // Ignore kill failures.
+        }
+        resolve(124);
+      }, timeoutMs);
+
+      child.once('error', (error) => {
+        if (settled) {
+          return;
+        }
+        settled = true;
+        clearTimeout(timer);
+        reject(error);
+      });
+
+      child.once('close', (code) => {
+        if (settled) {
+          return;
+        }
+        settled = true;
+        clearTimeout(timer);
+        resolve(code ?? 1);
+      });
+    });
+  } catch (error) {
+    console.log(`  ${chalk.red('Notification command could not be started.')}`);
+    logger.warn('Scan notification command failed to start', { error, shell, alertCommand });
+    return;
+  }
+
   if (exitCode === 0) {
     console.log(`  ${chalk.green('Notification command completed.')}`);
+  } else if (exitCode === 124) {
+    console.log(`  ${chalk.red(`Notification command timed out after ${timeoutMs}ms.`)}`);
   } else {
     console.log(`  ${chalk.red(`Notification command failed with exit code ${exitCode}.`)}`);
   }
@@ -301,7 +343,14 @@ function compareReports(
     .map((check) => {
       const previousCheck = previousChecks.get(check.id);
       if (!previousCheck) {
-        return null;
+        return check.status === 'PASS'
+          ? null
+          : {
+              id: check.id,
+              previousStatus: 'NEW' as const,
+              currentStatus: check.status,
+              message: check.message,
+            };
       }
 
       return statusRank(check.status) > statusRank(previousCheck.status)
@@ -390,6 +439,12 @@ function buildAlertSummary(comparison: DriftComparison, report: ScanReport): str
   }
 
   return parts.join(' ');
+}
+
+function getAlertTimeoutMs(): number {
+  const raw = process.env.CLAWREINS_ALERT_TIMEOUT_MS;
+  const parsed = raw ? Number.parseInt(raw, 10) : NaN;
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_ALERT_TIMEOUT_MS;
 }
 async function confirmFix(): Promise<boolean> {
   if (!process.stdin.isTTY) {
