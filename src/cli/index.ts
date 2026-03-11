@@ -82,6 +82,8 @@ program
   .option('--fix', 'Create a backup and apply supported remediations')
   .option('--html', 'Write and open an HTML scan report')
   .option('--json', 'Print the raw scan report as JSON')
+  .option('--monitor', 'Compare against the last saved scan and alert on configuration drift')
+  .option('--alert-command <command>', 'Run a notification command when monitor mode detects drift')
   .option('--yes', 'Skip the confirmation prompt when using --fix')
   .action(scanCommand);
 

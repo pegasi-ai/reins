@@ -633,10 +633,10 @@ export class SecurityScanner {
   private computeFixActions(context: ScanContext): FixAction[] {
     const actions: FixAction[] = [];
 
-    if (context.configFiles.some((file) => Boolean(file.raw && this.rebindGatewayRaw(file.raw) !== file.raw))) {
+    if (this.canFixGatewayBinding(context)) {
       actions.push({
         id: 'REBIND_GATEWAY',
-        description: 'Rebind gateway host from 0.0.0.0 to 127.0.0.1',
+        description: 'Bind gateway host to 127.0.0.1',
       });
     }
 
@@ -701,6 +701,20 @@ export class SecurityScanner {
         continue;
       }
 
+      const ext = path.extname(file.path).toLowerCase();
+      if (ext === '.json') {
+        try {
+          const parsed = JSON.parse(raw) as unknown;
+          const updatedJson = this.withGatewayHostBoundLocal(parsed);
+          if (JSON.stringify(updatedJson) !== JSON.stringify(parsed)) {
+            await fs.writeJson(file.path, updatedJson, { spaces: 2 });
+            touched.push(file.path);
+            continue;
+          }
+        } catch {
+          // Fall back to text replacement below.
+        }
+      }
       const updated = this.rebindGatewayRaw(raw);
       if (updated !== raw) {
         await fs.writeFile(file.path, updated, 'utf8');
@@ -711,6 +725,16 @@ export class SecurityScanner {
     return touched;
   }
 
+  private canFixGatewayBinding(context: ScanContext): boolean {
+    if (context.openclawConfig.exists && this.isRecord(context.openclawConfig.json)) {
+      const bound = this.withGatewayHostBoundLocal(context.openclawConfig.json);
+      if (JSON.stringify(bound) !== JSON.stringify(context.openclawConfig.json)) {
+        return true;
+      }
+    }
+
+    return context.configFiles.some((file) => Boolean(file.raw && this.rebindGatewayRaw(file.raw) !== file.raw));
+  }
   private rebindGatewayRaw(raw: string): string {
     return raw.replace(
       /((?:"(?:host|bind|address|listen)"|(?:host|bind|address|listen))\s*[:=]\s*["']?)0\.0\.0\.0(["']?)/gi,
@@ -718,6 +742,18 @@ export class SecurityScanner {
     );
   }
 
+  private withGatewayHostBoundLocal(value: unknown): Record<string, unknown> {
+    const root = this.isRecord(value) ? { ...value } : {};
+    const gateway = this.isRecord(root.gateway) ? { ...root.gateway } : {};
+    const host = typeof gateway.host === 'string' ? gateway.host : undefined;
+
+    if (!host || host === '0.0.0.0') {
+      gateway.host = '127.0.0.1';
+    }
+
+    root.gateway = gateway;
+    return root;
+  }
   private async fixPermissions(configFiles: ConfigSnapshot[]): Promise<string[]> {
     const touched: string[] = [];
 

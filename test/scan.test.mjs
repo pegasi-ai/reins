@@ -268,6 +268,176 @@ test('clawreins scan --fix --yes creates a backup and applies supported remediat
   assert.ok(existsSync(path.join(homeDir, 'Downloads', 'scan-report.html')));
 });
 
+test('clawreins scan --fix --yes binds gateway host when it is missing from config', () => {
+  const homeDir = makeTempRoot('clawreins-scan-fix-missing-host-home-');
+  const openclawHome = path.join(homeDir, '.openclaw');
+  const openclawConfig = path.join(openclawHome, 'openclaw.json');
+
+  writeJson(openclawConfig, {
+    gateway: {},
+    auth: { token: 'supersecuretoken123' },
+    browser: { headless: true },
+    tools: {
+      exec: {
+        safeBins: ['ls'],
+      },
+    },
+  });
+  chmodSync(openclawConfig, 0o600);
+
+  const result = runCli(['scan', '--fix', '--yes'], {
+    HOME: homeDir,
+    OPENCLAW_HOME: openclawHome,
+  });
+
+  assert.match(result.stdout, /Fix Results:/);
+  assert.match(result.stdout, /Bind gateway host to 127\.0\.0\.1/);
+  assert.match(result.stdout, /Applied 1 fix\(es\)\./);
+  assert.match(result.stdout, /Post-Fix Verdict:/);
+
+  const updatedConfig = JSON.parse(readFileSync(openclawConfig, 'utf8'));
+  assert.equal(updatedConfig.gateway.host, '127.0.0.1');
+});
+
+test('clawreins scan --monitor creates a baseline state file on first run', () => {
+  const homeDir = makeTempRoot('clawreins-scan-monitor-home-');
+  const openclawHome = path.join(homeDir, '.openclaw');
+  const openclawConfig = path.join(openclawHome, 'openclaw.json');
+
+  writeJson(openclawConfig, {
+    gateway: { host: '127.0.0.1' },
+    auth: { token: '${GATEWAY_TOKEN}' },
+    browser: { headless: true },
+    tools: {
+      exec: {
+        safeBins: ['ls'],
+      },
+    },
+    sandbox: true,
+    rateLimit: { maxRequests: 10 },
+  });
+  chmodSync(openclawConfig, 0o600);
+
+  const result = runCli(['scan', '--monitor'], {
+    HOME: homeDir,
+    OPENCLAW_HOME: openclawHome,
+  });
+
+  const statePath = path.join(openclawHome, 'clawreins', 'scan-state.json');
+  assert.notEqual(result.status, null);
+  assert.match(result.stdout, /Drift Monitor:/);
+  assert.match(result.stdout, /Baseline saved:/);
+  assert.ok(existsSync(statePath));
+
+  const state = JSON.parse(readFileSync(statePath, 'utf8'));
+  assert.equal(state.report.total, 13);
+});
+
+test('clawreins scan --monitor alerts when a check worsens relative to the saved baseline', () => {
+  const homeDir = makeTempRoot('clawreins-scan-monitor-drift-home-');
+  const openclawHome = path.join(homeDir, '.openclaw');
+  const openclawConfig = path.join(openclawHome, 'openclaw.json');
+
+  writeJson(openclawConfig, {
+    gateway: { host: '127.0.0.1' },
+    auth: { token: '${GATEWAY_TOKEN}' },
+    browser: { headless: true },
+    tools: {
+      exec: {
+        safeBins: ['ls'],
+      },
+    },
+    sandbox: true,
+    rateLimit: { maxRequests: 10 },
+  });
+  chmodSync(openclawConfig, 0o600);
+
+  const firstResult = runCli(['scan', '--monitor'], {
+    HOME: homeDir,
+    OPENCLAW_HOME: openclawHome,
+  });
+  assert.notEqual(firstResult.status, null);
+
+  writeJson(openclawConfig, {
+    gateway: { host: '127.0.0.1' },
+    auth: { token: '${GATEWAY_TOKEN}' },
+    authBypass: true,
+    browser: { headless: true },
+    tools: {
+      exec: {
+        safeBins: ['ls'],
+      },
+    },
+    sandbox: true,
+    rateLimit: { maxRequests: 10 },
+  });
+  chmodSync(openclawConfig, 0o600);
+
+  const secondResult = runCli(['scan', '--monitor'], {
+    HOME: homeDir,
+    OPENCLAW_HOME: openclawHome,
+  });
+
+  assert.equal(secondResult.status, 2, `stderr: ${secondResult.stderr}`);
+  assert.match(secondResult.stdout, /Configuration drift detected\./);
+  assert.match(secondResult.stdout, /CONTROL_UI_AUTH: PASS -> FAIL/);
+});
+
+test('clawreins scan --monitor can invoke an alert command when drift is detected', () => {
+  const homeDir = makeTempRoot('clawreins-scan-monitor-alert-home-');
+  const openclawHome = path.join(homeDir, '.openclaw');
+  const openclawConfig = path.join(openclawHome, 'openclaw.json');
+  const alertOutput = path.join(homeDir, 'alert.txt');
+  const alertCommand = `${JSON.stringify(process.execPath)} -e ${JSON.stringify(
+    "require('fs').writeFileSync(process.env.CLAWREINS_ALERT_OUT, process.env.CLAWREINS_SCAN_SUMMARY)"
+  )}`;
+
+  writeJson(openclawConfig, {
+    gateway: { host: '127.0.0.1' },
+    auth: { token: '${GATEWAY_TOKEN}' },
+    browser: { headless: true },
+    tools: {
+      exec: {
+        safeBins: ['ls'],
+      },
+    },
+    sandbox: true,
+    rateLimit: { maxRequests: 10 },
+  });
+  chmodSync(openclawConfig, 0o600);
+
+  const firstResult = runCli(['scan', '--monitor'], {
+    HOME: homeDir,
+    OPENCLAW_HOME: openclawHome,
+  });
+  assert.notEqual(firstResult.status, null);
+
+  writeJson(openclawConfig, {
+    gateway: { host: '127.0.0.1' },
+    auth: { token: '${GATEWAY_TOKEN}' },
+    authBypass: true,
+    browser: { headless: true },
+    tools: {
+      exec: {
+        safeBins: ['ls'],
+      },
+    },
+    sandbox: true,
+    rateLimit: { maxRequests: 10 },
+  });
+  chmodSync(openclawConfig, 0o600);
+
+  const secondResult = runCli(['scan', '--monitor', '--alert-command', alertCommand], {
+    HOME: homeDir,
+    OPENCLAW_HOME: openclawHome,
+    CLAWREINS_ALERT_OUT: alertOutput,
+  });
+
+  assert.equal(secondResult.status, 2, `stderr: ${secondResult.stderr}`);
+  assert.match(secondResult.stdout, /Alert Command:/);
+  assert.ok(existsSync(alertOutput));
+  assert.match(readFileSync(alertOutput, 'utf8'), /CONTROL_UI_AUTH: PASS -> FAIL/);
+});
 test('clawreins scan --html does not crash when the system opener is unavailable', () => {
   const homeDir = makeTempRoot('clawreins-scan-html-home-');
   const openclawHome = path.join(homeDir, '.openclaw');
