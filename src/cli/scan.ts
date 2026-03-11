@@ -73,7 +73,7 @@ export async function scanCommand(options: ScanCommandOptions): Promise<void> {
     const initialPlan = await scanner.planFixes();
 
     if (options.fix) {
-      const fixResult = await maybeApplyFixes(scanner, initialPlan, options.yes === true);
+      const fixResult = await maybeApplyFixes(scanner, initialPlan, options.yes === true, report);
 
       if (fixResult) {
         console.log('');
@@ -86,7 +86,7 @@ export async function scanCommand(options: ScanCommandOptions): Promise<void> {
         console.log('');
       }
     } else if (!options.monitor) {
-      await maybeOfferFix(scanner, initialPlan);
+      await maybeOfferFix(scanner, initialPlan, report);
     }
 
     const reportPath = await writeHtmlReport(report);
@@ -112,11 +112,11 @@ export async function scanCommand(options: ScanCommandOptions): Promise<void> {
 async function maybeApplyFixes(
   scanner: SecurityScanner,
   actions: FixAction[],
-  assumeYes: boolean
+  assumeYes: boolean,
+  currentReport: ScanReport
 ): Promise<FixResult | null> {
   if (actions.length === 0) {
-    const report = await scanner.run();
-    renderNoFixesAvailable(report);
+    renderNoFixesAvailable(currentReport);
     return null;
   }
 
@@ -147,10 +147,13 @@ async function maybeApplyFixes(
   return result;
 }
 
-async function maybeOfferFix(scanner: SecurityScanner, actions: FixAction[]): Promise<void> {
+async function maybeOfferFix(
+  scanner: SecurityScanner,
+  actions: FixAction[],
+  currentReport: ScanReport
+): Promise<void> {
   if (actions.length === 0) {
-    const report = await scanner.run();
-    renderNoFixesAvailable(report);
+    renderNoFixesAvailable(currentReport);
     return;
   }
 
@@ -176,7 +179,7 @@ async function maybeOfferFix(scanner: SecurityScanner, actions: FixAction[]): Pr
     return;
   }
 
-  const fixResult = await maybeApplyFixes(scanner, actions, true);
+  const fixResult = await maybeApplyFixes(scanner, actions, true, currentReport);
   if (!fixResult) {
     return;
   }
@@ -245,7 +248,7 @@ async function maybeSendMonitorAlert(
   }
 
   const shell = process.env.SHELL || (process.platform === 'win32' ? process.env.COMSPEC || 'cmd.exe' : '/bin/sh');
-  const shellArgs = process.platform === 'win32' ? ['/d', '/s', '/c', alertCommand] : ['-lc', alertCommand];
+  const shellArgs = process.platform === 'win32' ? ['/d', '/s', '/c', alertCommand] : ['-c', alertCommand];
   const env = {
     ...process.env,
     CLAWREINS_SCAN_ALERT: '1',

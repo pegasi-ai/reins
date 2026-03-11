@@ -299,6 +299,41 @@ test('clawreins scan --fix --yes binds gateway host when it is missing from conf
   assert.equal(updatedConfig.gateway.host, '127.0.0.1');
 });
 
+test('clawreins scan --fix --yes does not inject gateway config into unrelated JSON files', () => {
+  const homeDir = makeTempRoot('clawreins-scan-fix-unrelated-json-home-');
+  const openclawHome = path.join(homeDir, '.openclaw');
+  const openclawConfig = path.join(openclawHome, 'openclaw.json');
+  const unrelatedConfig = path.join(openclawHome, 'config.json');
+
+  writeJson(openclawConfig, {
+    gateway: {},
+    auth: { token: 'supersecuretoken123' },
+    browser: { headless: true },
+    tools: {
+      exec: {
+        safeBins: ['ls'],
+      },
+    },
+  });
+  writeJson(unrelatedConfig, {
+    theme: 'dark',
+  });
+  chmodSync(openclawConfig, 0o600);
+  chmodSync(unrelatedConfig, 0o600);
+
+  const result = runCli(['scan', '--fix', '--yes'], {
+    HOME: homeDir,
+    OPENCLAW_HOME: openclawHome,
+  });
+
+  assert.notEqual(result.status, null);
+
+  const updatedOpenclawConfig = JSON.parse(readFileSync(openclawConfig, 'utf8'));
+  const updatedUnrelatedConfig = JSON.parse(readFileSync(unrelatedConfig, 'utf8'));
+  assert.equal(updatedOpenclawConfig.gateway.host, '127.0.0.1');
+  assert.deepEqual(updatedUnrelatedConfig, { theme: 'dark' });
+});
+
 test('clawreins scan --monitor creates a baseline state file on first run', () => {
   const homeDir = makeTempRoot('clawreins-scan-monitor-home-');
   const openclawHome = path.join(homeDir, '.openclaw');

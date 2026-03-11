@@ -705,11 +705,13 @@ export class SecurityScanner {
       if (ext === '.json') {
         try {
           const parsed = JSON.parse(raw) as unknown;
-          const updatedJson = this.withGatewayHostBoundLocal(parsed);
-          if (JSON.stringify(updatedJson) !== JSON.stringify(parsed)) {
-            await fs.writeJson(file.path, updatedJson, { spaces: 2 });
-            touched.push(file.path);
-            continue;
+          if (this.shouldMutateGatewayJson(parsed, file.path)) {
+            const updatedJson = this.withGatewayHostBoundLocal(parsed);
+            if (JSON.stringify(updatedJson) !== JSON.stringify(parsed)) {
+              await fs.writeJson(file.path, updatedJson, { spaces: 2 });
+              touched.push(file.path);
+              continue;
+            }
           }
         } catch {
           // Fall back to text replacement below.
@@ -754,6 +756,15 @@ export class SecurityScanner {
     root.gateway = gateway;
     return root;
   }
+
+  private shouldMutateGatewayJson(value: unknown, filePath: string): boolean {
+    if (!this.isRecord(value)) {
+      return false;
+    }
+
+    return filePath === this.openclawConfigPath || Object.prototype.hasOwnProperty.call(value, 'gateway');
+  }
+
   private async fixPermissions(configFiles: ConfigSnapshot[]): Promise<string[]> {
     const touched: string[] = [];
 
