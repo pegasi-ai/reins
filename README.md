@@ -273,6 +273,29 @@ openclaw gateway restart
 
 Done! ClawReins is now protecting your OpenClaw instance.
 
+### Building from Source
+
+Use this to run ClawReins from a local clone instead of the published npm package.
+
+```bash
+# Clone and build
+git clone https://github.com/pegasi-ai/clawreins
+cd clawreins
+npm install
+npm run build
+
+# Register as a linked plugin (loads from local source)
+openclaw plugins install --link .
+
+# Run setup
+node dist/cli/index.js init
+
+# Reload gateway
+openclaw gateway restart
+```
+
+After any code change, run `npm run build` and `openclaw gateway restart` — no re-registration needed.
+
 `clawreins init` now enables ToolShield by default:
 - Uses bundled ToolShield core from this repo first (`src/core/toolshield`)
 - Falls back to auto-install via `pip` only if bundled core is unavailable
