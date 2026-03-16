@@ -197,6 +197,54 @@ test('denyPaths takes precedence over allowPaths', async () => {
   assert.equal(result.block, true);
 });
 
+// ---------------------------------------------------------------------------
+// Bug fixes
+// ---------------------------------------------------------------------------
+
+test('tilde in denyPaths expands correctly and blocks ~/.ssh paths', async () => {
+  const interceptor = new Interceptor(
+    {
+      defaultAction: 'ALLOW',
+      modules: {
+        FileSystem: {
+          read: { action: 'ALLOW', denyPaths: ['~/.ssh/**'] },
+        },
+      },
+    },
+    false
+  );
+  const hook = createToolCallHook(interceptor);
+
+  const result = await hook(
+    { toolName: 'read', params: { path: '~/.ssh/id_rsa' } },
+    { toolName: 'read', sessionKey: 'policy:tilde-deny' }
+  );
+
+  assert.equal(result.block, true);
+});
+
+test('** in allowPaths matches the directory root itself', async () => {
+  const interceptor = new Interceptor(
+    {
+      defaultAction: 'ALLOW',
+      modules: {
+        FileSystem: {
+          read: { action: 'ALLOW', allowPaths: ['/workspace/**'] },
+        },
+      },
+    },
+    false
+  );
+  const hook = createToolCallHook(interceptor);
+
+  const result = await hook(
+    { toolName: 'read', params: { path: '/workspace' } },
+    { toolName: 'read', sessionKey: 'policy:glob-root' }
+  );
+
+  assert.notEqual(result.block, true);
+});
+
 test('path not matching denyPaths passes through', async () => {
   const interceptor = new Interceptor(
     {

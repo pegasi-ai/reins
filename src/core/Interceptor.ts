@@ -25,18 +25,25 @@ import chalk from 'chalk';
 // Supports: * (within a segment), ** (any depth), ? (single char)
 // ---------------------------------------------------------------------------
 
+function expandTilde(raw: string): string {
+  if (raw === '~' || raw.startsWith('~/') || raw.startsWith('~\\')) {
+    const home = process.env.HOME ?? process.env.USERPROFILE ?? '~';
+    return home + raw.slice(1);
+  }
+  return raw;
+}
+
 function matchesGlob(pattern: string, str: string): boolean {
   const norm = str.replace(/\\/g, '/');
-  const pat = pattern
-    .replace(/\\/g, '/')
-    .replace(/^~/, process.env.HOME ?? '~');
+  const pat = expandTilde(pattern).replace(/\\/g, '/');
 
   const regex = pat
     .replace(/[.+^${}()|[\]]/g, '\\$&') // escape regex specials
     .replace(/\*\*/g, '\x00')            // placeholder for **
     .replace(/\*/g, '[^/]*')             // * → any non-slash chars
     .replace(/\?/g, '[^/]')              // ? → single non-slash char
-    .replace(/\x00/g, '.*');             // ** → anything including /
+    .replace(/\/\x00/g, '(?:/.+)?')     // /** → slash + content optional (matches dir root)
+    .replace(/\x00/g, '.*');             // standalone ** → anything
 
   return new RegExp(`^${regex}$`).test(norm);
 }
@@ -50,8 +57,9 @@ function extractTarget(moduleName: string, params: Record<string, unknown>): str
     return (params.url ?? params.src ?? null) as string | null;
   }
   const raw = (params.path ?? params.file_path ?? params.target ?? null) as string | null;
-  // Resolve relative paths so patterns like /workspace/** work reliably.
-  return raw ? path.resolve(raw) : null;
+  if (!raw) return null;
+  // Expand ~ before resolving so ~/.ssh/id_rsa becomes /home/user/.ssh/id_rsa
+  return path.resolve(expandTilde(raw));
 }
 
 /**
@@ -68,7 +76,15 @@ function applyPathPolicy(
   const params = (args[0] as Record<string, unknown>) ?? {};
   const target = extractTarget(moduleName, params);
 
-  if (!target) return rule; // no path to check — pass through
+  if (!target) {
+    // Path filtering is configured but no recognisable path param was found.
+    // Log a warning so this silent bypass is visible in the audit trail.
+    logger.warn(
+      `applyPathPolicy: path filtering configured for ${moduleName} but no target path found in params — filtering skipped`,
+      { params }
+    );
+    return rule;
+  }
 
   // denyPaths take precedence over allowPaths.
   if (rule.denyPaths?.some((p) => matchesGlob(p, target))) {
@@ -275,7 +291,248 @@ export class Interceptor {
         `Ask the user to type exactly: ${token}\n` +
         `Then call clawreins_respond({ decision: "confirm", confirmation: "${token}" }), then retry.`
       );
-    }
+    }0.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+    
 
     if (requiresRespondToolApproval && !this.respondToolAvailable) {
       return (
