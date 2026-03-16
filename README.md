@@ -420,6 +420,8 @@ Default policy (Balanced):
 - Network: fetch=ASK, request=ASK
 - Everything else: ASK (fail-secure default)
 
+> **Customizable:** Every rule is editable. Policies are stored as plain JSON at `~/.openclaw/clawreins/policy.json`. See [Customizing Security Policies](docs/policies.md) for the full schema, path filtering, and examples.
+
 ## CLI Commands
 
 ```bash
