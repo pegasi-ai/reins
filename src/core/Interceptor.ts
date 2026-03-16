@@ -4,6 +4,7 @@
  */
 
 import crypto from 'crypto';
+import path from 'path';
 import {
   SecurityPolicy,
   Decision,
@@ -18,6 +19,77 @@ import { StatsTracker } from '../storage/StatsTracker';
 import { trustRateLimiter } from './TrustRateLimiter';
 import { logger } from './Logger';
 import chalk from 'chalk';
+
+// ---------------------------------------------------------------------------
+// Path-policy helpers (no external dependency)
+// Supports: * (within a segment), ** (any depth), ? (single char)
+// ---------------------------------------------------------------------------
+
+function matchesGlob(pattern: string, str: string): boolean {
+  const norm = str.replace(/\\/g, '/');
+  const pat = pattern
+    .replace(/\\/g, '/')
+    .replace(/^~/, process.env.HOME ?? '~');
+
+  const regex = pat
+    .replace(/[.+^${}()|[\]]/g, '\\$&') // escape regex specials
+    .replace(/\*\*/g, '\x00')            // placeholder for **
+    .replace(/\*/g, '[^/]*')             // * → any non-slash chars
+    .replace(/\?/g, '[^/]')              // ? → single non-slash char
+    .replace(/\x00/g, '.*');             // ** → anything including /
+
+  return new RegExp(`^${regex}$`).test(norm);
+}
+
+/**
+ * Extract the path or URL that a tool call is targeting, for path-policy evaluation.
+ * Returns null if no target can be determined (policy check is skipped).
+ */
+function extractTarget(moduleName: string, params: Record<string, unknown>): string | null {
+  if (moduleName === 'Browser' || moduleName === 'Network') {
+    return (params.url ?? params.src ?? null) as string | null;
+  }
+  const raw = (params.path ?? params.file_path ?? params.target ?? null) as string | null;
+  // Resolve relative paths so patterns like /workspace/** work reliably.
+  return raw ? path.resolve(raw) : null;
+}
+
+/**
+ * Apply allowPaths / denyPaths from the rule against the actual target.
+ * Returns a DENY rule if the path is out of bounds, otherwise returns the rule unchanged.
+ */
+function applyPathPolicy(
+  rule: SecurityRule,
+  moduleName: string,
+  args: unknown[]
+): SecurityRule {
+  if (!rule.allowPaths?.length && !rule.denyPaths?.length) return rule;
+
+  const params = (args[0] as Record<string, unknown>) ?? {};
+  const target = extractTarget(moduleName, params);
+
+  if (!target) return rule; // no path to check — pass through
+
+  // denyPaths take precedence over allowPaths.
+  if (rule.denyPaths?.some((p) => matchesGlob(p, target))) {
+    return {
+      action: 'DENY',
+      description: `Path "${target}" matches a denied pattern`,
+    };
+  }
+
+  // If allowPaths is set the target must match at least one entry.
+  if (rule.allowPaths?.length && !rule.allowPaths.some((p) => matchesGlob(p, target))) {
+    return {
+      action: 'DENY',
+      description: `Path "${target}" is not in the allowed paths list`,
+    };
+  }
+
+  return rule;
+}
+
+// ---------------------------------------------------------------------------
 
 export class Interceptor {
   private policy: SecurityPolicy;
@@ -46,7 +118,11 @@ export class Interceptor {
     sessionKey?: string,
     intervention?: InterventionMetadata
   ): Promise<void> {
-    const originalRule = this.lookupRule(moduleName, methodName);
+    const baseRule = this.lookupRule(moduleName, methodName);
+    // Path-policy check runs before intervention so a denied path is never
+    // upgradeable to ASK — it's a hard DENY.
+    const originalRule = applyPathPolicy(baseRule, moduleName, args);
+
     const normalizedIntervention = this.normalizeIntervention(
       moduleName,
       methodName,
@@ -86,8 +162,7 @@ export class Interceptor {
 
         throw new Error(
           `[ClawReins:APPROVAL_REQUIRED] ${moduleName}.${methodName}() is blocked pending human approval. ` +
-            `Risk: ${detail}
-` +
+            `Risk: ${detail}\n` +
             instructions
         );
       }

@@ -34,6 +34,12 @@ export async function policyCommand(): Promise<void> {
             rule.description ? `- ${rule.description}` : ''
           )}`
         );
+        if (rule.allowPaths?.length) {
+          console.log(chalk.dim(`      allow: ${rule.allowPaths.join(', ')}`));
+        }
+        if (rule.denyPaths?.length) {
+          console.log(chalk.dim(`      deny:  ${rule.denyPaths.join(', ')}`));
+        }
       });
     });
     console.log('');
@@ -125,7 +131,7 @@ async function modifyRule(policy: PersistedPolicy): Promise<void> {
 
   const currentRule = policy.modules[moduleName][methodName];
 
-  const { newAction, newDescription } = await inquirer.prompt([
+  const { newAction, newDescription, newAllowPaths, newDenyPaths } = await inquirer.prompt([
     {
       type: 'list',
       name: 'newAction',
@@ -139,11 +145,30 @@ async function modifyRule(policy: PersistedPolicy): Promise<void> {
       message: 'Description (optional):',
       default: currentRule.description || '',
     },
+    {
+      type: 'input',
+      name: 'newAllowPaths',
+      message: 'Allowed path patterns (comma-separated globs, leave empty to allow all):',
+      default: currentRule.allowPaths?.join(', ') || '',
+    },
+    {
+      type: 'input',
+      name: 'newDenyPaths',
+      message: 'Denied path patterns (comma-separated globs, leave empty for none):',
+      default: currentRule.denyPaths?.join(', ') || '',
+    },
   ]);
+
+  const parseGlobs = (raw: string): string[] | undefined => {
+    const list = raw.split(',').map((s: string) => s.trim()).filter(Boolean);
+    return list.length ? list : undefined;
+  };
 
   policy.modules[moduleName][methodName] = {
     action: newAction,
     description: newDescription || undefined,
+    allowPaths: parseGlobs(newAllowPaths),
+    denyPaths: parseGlobs(newDenyPaths),
   };
 
   await PolicyStore.save(policy);
