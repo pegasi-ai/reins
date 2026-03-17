@@ -15,6 +15,15 @@ const require = createRequire(import.meta.url);
 const { Interceptor } = require('../dist/core/Interceptor.js');
 const { createToolCallHook } = require('../dist/plugin/tool-interceptor.js');
 
+// Temp dirs used as stand-ins for real paths — no real directories assumed
+const allowedDir = mkdtempSync(path.join(os.tmpdir(), 'clawreins-allowed-'));
+const outsideDir = mkdtempSync(path.join(os.tmpdir(), 'clawreins-outside-'));
+const secretsDir = path.join(allowedDir, 'secrets');
+const allowedFile = path.join(allowedDir, 'output.txt');
+const outsideFile = path.join(outsideDir, 'other.txt');
+const secretsFile = path.join(secretsDir, 'keys.json');
+const nestedFile = path.join(allowedDir, 'subdir', 'readme.md');
+
 // ---------------------------------------------------------------------------
 // defaultAction
 // ---------------------------------------------------------------------------
@@ -68,7 +77,7 @@ test('custom rule ALLOW lets read through without approval', async () => {
   const hook = createToolCallHook(interceptor);
 
   const result = await hook(
-    { toolName: 'read', params: { path: '/workspace/notes.txt' } },
+    { toolName: 'read', params: { path: allowedFile } },
     { toolName: 'read', sessionKey: 'policy:custom-allow' }
   );
 
@@ -90,7 +99,7 @@ test('custom rule DENY blocks read even when defaultAction is ALLOW', async () =
   const hook = createToolCallHook(interceptor);
 
   const result = await hook(
-    { toolName: 'read', params: { path: '/workspace/notes.txt' } },
+    { toolName: 'read', params: { path: allowedFile } },
     { toolName: 'read', sessionKey: 'policy:custom-deny' }
   );
 
@@ -107,7 +116,7 @@ test('allowPaths denies write to path outside the allowlist', async () => {
       defaultAction: 'ALLOW',
       modules: {
         FileSystem: {
-          write: { action: 'ALLOW', allowPaths: ['/workspace/**'] },
+          write: { action: 'ALLOW', allowPaths: [`${allowedDir}/**`] },
         },
       },
     },
@@ -116,7 +125,7 @@ test('allowPaths denies write to path outside the allowlist', async () => {
   const hook = createToolCallHook(interceptor);
 
   const result = await hook(
-    { toolName: 'write', params: { path: '/etc/passwd' } },
+    { toolName: 'write', params: { path: outsideFile } },
     { toolName: 'write', sessionKey: 'policy:allow-paths-deny' }
   );
 
@@ -129,7 +138,7 @@ test('allowPaths passes write to path inside the allowlist', async () => {
       defaultAction: 'ALLOW',
       modules: {
         FileSystem: {
-          write: { action: 'ALLOW', allowPaths: ['/workspace/**'] },
+          write: { action: 'ALLOW', allowPaths: [`${allowedDir}/**`] },
         },
       },
     },
@@ -138,7 +147,7 @@ test('allowPaths passes write to path inside the allowlist', async () => {
   const hook = createToolCallHook(interceptor);
 
   const result = await hook(
-    { toolName: 'write', params: { path: '/workspace/output.txt' } },
+    { toolName: 'write', params: { path: allowedFile } },
     { toolName: 'write', sessionKey: 'policy:allow-paths-pass' }
   );
 
@@ -149,13 +158,13 @@ test('allowPaths passes write to path inside the allowlist', async () => {
 // denyPaths
 // ---------------------------------------------------------------------------
 
-test('denyPaths blocks sensitive path even when action is ALLOW', async () => {
+test('denyPaths blocks path matching deny pattern even when action is ALLOW', async () => {
   const interceptor = new Interceptor(
     {
       defaultAction: 'ALLOW',
       modules: {
         FileSystem: {
-          read: { action: 'ALLOW', denyPaths: ['**/.ssh/**', '**/.env'] },
+          read: { action: 'ALLOW', denyPaths: ['**/secrets/**'] },
         },
       },
     },
@@ -164,7 +173,7 @@ test('denyPaths blocks sensitive path even when action is ALLOW', async () => {
   const hook = createToolCallHook(interceptor);
 
   const result = await hook(
-    { toolName: 'read', params: { path: '/home/user/.ssh/id_rsa' } },
+    { toolName: 'read', params: { path: secretsFile } },
     { toolName: 'read', sessionKey: 'policy:deny-paths' }
   );
 
@@ -179,7 +188,7 @@ test('denyPaths takes precedence over allowPaths', async () => {
         FileSystem: {
           read: {
             action: 'ALLOW',
-            allowPaths: ['/workspace/**'],
+            allowPaths: [`${allowedDir}/**`],
             denyPaths: ['**/secrets/**'],
           },
         },
@@ -190,8 +199,82 @@ test('denyPaths takes precedence over allowPaths', async () => {
   const hook = createToolCallHook(interceptor);
 
   const result = await hook(
-    { toolName: 'read', params: { path: '/workspace/secrets/keys.json' } },
+    { toolName: 'read', params: { path: secretsFile } },
     { toolName: 'read', sessionKey: 'policy:deny-over-allow' }
+  );
+
+  assert.equal(result.block, true);
+});
+
+test('path not matching denyPaths passes through', async () => {
+  const interceptor = new Interceptor(
+    {
+      defaultAction: 'ALLOW',
+      modules: {
+        FileSystem: {
+          read: {
+            action: 'ALLOW',
+            allowPaths: [`${allowedDir}/**`],
+            denyPaths: ['**/secrets/**'],
+          },
+        },
+      },
+    },
+    false
+  );
+  const hook = createToolCallHook(interceptor);
+
+  const result = await hook(
+    { toolName: 'read', params: { path: nestedFile } },
+    { toolName: 'read', sessionKey: 'policy:deny-paths-no-match' }
+  );
+
+  assert.notEqual(result.block, true);
+});
+
+// ---------------------------------------------------------------------------
+// edit and write share the same rule
+// ---------------------------------------------------------------------------
+
+test('edit tool respects the write rule (ALLOW)', async () => {
+  const interceptor = new Interceptor(
+    {
+      defaultAction: 'DENY',
+      modules: {
+        FileSystem: {
+          write: { action: 'ALLOW' },
+        },
+      },
+    },
+    false
+  );
+  const hook = createToolCallHook(interceptor);
+
+  const result = await hook(
+    { toolName: 'edit', params: { path: allowedFile } },
+    { toolName: 'edit', sessionKey: 'policy:edit-as-write-allow' }
+  );
+
+  assert.notEqual(result.block, true);
+});
+
+test('edit tool respects the write rule (DENY)', async () => {
+  const interceptor = new Interceptor(
+    {
+      defaultAction: 'ALLOW',
+      modules: {
+        FileSystem: {
+          write: { action: 'DENY' },
+        },
+      },
+    },
+    false
+  );
+  const hook = createToolCallHook(interceptor);
+
+  const result = await hook(
+    { toolName: 'edit', params: { path: allowedFile } },
+    { toolName: 'edit', sessionKey: 'policy:edit-as-write-deny' }
   );
 
   assert.equal(result.block, true);
@@ -229,7 +312,7 @@ test('** in allowPaths matches the directory root itself', async () => {
       defaultAction: 'ALLOW',
       modules: {
         FileSystem: {
-          read: { action: 'ALLOW', allowPaths: ['/workspace/**'] },
+          read: { action: 'ALLOW', allowPaths: [`${allowedDir}/**`] },
         },
       },
     },
@@ -238,34 +321,8 @@ test('** in allowPaths matches the directory root itself', async () => {
   const hook = createToolCallHook(interceptor);
 
   const result = await hook(
-    { toolName: 'read', params: { path: '/workspace' } },
+    { toolName: 'read', params: { path: allowedDir } },
     { toolName: 'read', sessionKey: 'policy:glob-root' }
-  );
-
-  assert.notEqual(result.block, true);
-});
-
-test('path not matching denyPaths passes through', async () => {
-  const interceptor = new Interceptor(
-    {
-      defaultAction: 'ALLOW',
-      modules: {
-        FileSystem: {
-          read: {
-            action: 'ALLOW',
-            allowPaths: ['/workspace/**'],
-            denyPaths: ['**/secrets/**'],
-          },
-        },
-      },
-    },
-    false
-  );
-  const hook = createToolCallHook(interceptor);
-
-  const result = await hook(
-    { toolName: 'read', params: { path: '/workspace/readme.md' } },
-    { toolName: 'read', sessionKey: 'policy:deny-paths-no-match' }
   );
 
   assert.notEqual(result.block, true);

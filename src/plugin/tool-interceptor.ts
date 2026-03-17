@@ -35,7 +35,7 @@ const TOOL_TO_MODULE: Record<string, { module: string; method: string }> = {
   // FileSystem
   read: { module: 'FileSystem', method: 'read' },
   write: { module: 'FileSystem', method: 'write' },
-  edit: { module: 'FileSystem', method: 'edit' },
+  edit: { module: 'FileSystem', method: 'write' },
   glob: { module: 'FileSystem', method: 'list' },
   // Shell
   bash: { module: 'Shell', method: 'bash' },
