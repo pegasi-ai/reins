@@ -10,6 +10,7 @@
 
 import inquirer from 'inquirer';
 import chalk from 'chalk';
+import crypto from 'crypto';
 import { ExecutionContext } from '../types';
 import { logger } from './Logger';
 import { approvalQueue } from './ApprovalQueue';
@@ -106,15 +107,6 @@ export class Arbitrator {
   private judgeChannel(context: ExecutionContext): boolean {
     const { sessionKey, moduleName, methodName } = context;
     const strict = context.intervention?.requiresExplicitConfirmation === true;
-    const requiresRespondToolApproval = context.intervention?.requiresRespondToolApproval === true;
-
-    if (requiresRespondToolApproval && !context.respondToolAvailable) {
-      logger.warn(`ASK policy → blocked (respond tool unavailable for destructive action)`, {
-        sessionKey,
-        action: `${moduleName}.${methodName}`,
-      });
-      return false;
-    }
 
     if (!strict && approvalQueue.hasBlanketAllow(sessionKey!, moduleName, methodName)) {
       logger.info(`ASK policy → auto-approved (blanket allow): ${moduleName}.${methodName}()`, {
@@ -130,26 +122,29 @@ export class Arbitrator {
       return true;
     }
 
-    if (!strict && !requiresRespondToolApproval && approvalQueue.consumePending(sessionKey!, moduleName, methodName)) {
-      logger.info(
-        `ASK policy → approved via channel (retry-as-approval): ${moduleName}.${methodName}()`,
-        { sessionKey }
-      );
-      return true;
-    }
+    // Always assign a token so the OOB notifier can reference it in the !approve message.
+    const token =
+      context.intervention?.confirmationToken || this.generateChannelToken(moduleName, methodName);
 
     approvalQueue.request(sessionKey!, moduleName, methodName, {
       requiresExplicitConfirmation: strict,
       actionSummary: context.intervention?.actionSummary,
-      confirmationToken: context.intervention?.confirmationToken,
-      allowRetryAsApproval: !requiresRespondToolApproval,
+      confirmationToken: token,
+      // Retry-as-approval is disabled: approval must come from !approve <token>.
+      allowRetryAsApproval: false,
     });
 
-    logger.info(`ASK policy → awaiting channel approval: ${moduleName}.${methodName}()`, {
+    logger.info(`ASK policy → awaiting OOB channel approval: ${moduleName}.${methodName}()`, {
       sessionKey,
+      token,
       requiresExplicitConfirmation: strict,
     });
     return false;
+  }
+
+  private generateChannelToken(moduleName: string, methodName: string): string {
+    const seed = `${moduleName}.${methodName}:${Date.now()}:${Math.random()}`;
+    return `CONFIRM-${crypto.createHash('sha1').update(seed).digest('hex').slice(0, 6).toUpperCase()}`;
   }
 
   private displayBanner(): void {

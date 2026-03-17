@@ -4,7 +4,6 @@
  */
 
 import { Interceptor } from '../core/Interceptor';
-import { approvalQueue } from '../core/ApprovalQueue';
 import { logger } from '../core/Logger';
 import { detectBrowserChallenge } from '../core/BrowserChallengeDetector';
 import { scoreIrreversibility, IrreversibilityAssessment } from '../core/IrreversibilityScorer';
@@ -23,19 +22,13 @@ import { DecisionLog } from '../storage/DecisionLog';
 import crypto from 'crypto';
 
 /**
- * Tool name for the custom clawreins_respond tool.
- * The LLM calls this to relay the user's YES/NO/ALLOW/CONFIRM decision.
- */
-export const CLAWREINS_RESPOND_TOOL = 'clawreins_respond';
-
-/**
  * Mapping from flat OpenClaw tool names to ClawReins module/method pairs.
  */
 const TOOL_TO_MODULE: Record<string, { module: string; method: string }> = {
   // FileSystem
   read: { module: 'FileSystem', method: 'read' },
   write: { module: 'FileSystem', method: 'write' },
-  edit: { module: 'FileSystem', method: 'edit' },
+  edit: { module: 'FileSystem', method: 'write' },
   glob: { module: 'FileSystem', method: 'list' },
   // Shell
   bash: { module: 'Shell', method: 'bash' },
@@ -94,11 +87,6 @@ export function createToolCallHook(
 ): (event: BeforeToolCallEvent, ctx: ToolContext) => Promise<BeforeToolCallResult | void> {
   return async (event, ctx): Promise<BeforeToolCallResult | void> => {
     const { toolName } = event;
-
-    // Intercept our own control tool before any policy evaluation.
-    if (toolName === CLAWREINS_RESPOND_TOOL) {
-      return handleRespondTool(event.params, ctx);
-    }
 
     const mapping = TOOL_TO_MODULE[toolName.toLowerCase()];
     const moduleName = mapping?.module ?? 'Unknown';
@@ -261,8 +249,7 @@ function buildInterventionMetadata(
     intervention.actionSummary = buildDestructiveSummary(
       moduleName,
       methodName,
-      destructive,
-      intervention.confirmationToken
+      destructive
     );
     intervention.interventionReason =
       'Pre-execution destructive action intercept triggered; explicit human authorization required.';
@@ -369,8 +356,7 @@ function generateConfirmationToken(moduleName: string, methodName: string): stri
 function buildDestructiveSummary(
   moduleName: string,
   methodName: string,
-  classification: DestructiveClassification,
-  confirmationToken?: string
+  classification: DestructiveClassification
 ): string {
   const lines = [
     `⚠ CLAWREINS INTERCEPT (${classification.severity})`,
@@ -385,13 +371,8 @@ function buildDestructiveSummary(
   }
 
   lines.push(`Reasons: ${classification.reasons.join(', ') || 'destructive_signal'}`);
-  lines.push(
-    `Require: ${
-      classification.severity === 'CATASTROPHIC'
-        ? confirmationToken || 'CONFIRM-XXXXXX'
-        : 'YES or ALLOW'
-    }`
-  );
+  // Token intentionally omitted — delivered out-of-band only, never in agent context.
+  lines.push(`Require: out-of-band human approval`);
   return lines.join('\n');
 }
 
@@ -450,215 +431,6 @@ function logInterceptEvent(input: InterceptEventInput): void {
   });
 }
 
-/**
- * Handle the clawreins_respond tool call.
- * Always blocks (this is a control signal, not a real tool execution).
- */
-function handleRespondTool(
-  params: Record<string, unknown>,
-  ctx: ToolContext
-): BeforeToolCallResult {
-  const BLANKET_DURATION_MS = 15 * 60 * 1000;
-  const decision = typeof params.decision === 'string' ? params.decision.toLowerCase() : '';
-  const sessionKey = ctx.sessionKey;
-
-  if (!sessionKey) {
-    logger.warn(`[${CLAWREINS_RESPOND_TOOL}] No sessionKey in context`);
-    return { block: true, blockReason: 'Error: no session context available.' };
-  }
-
-  if (decision === 'yes') {
-    const strictPending = approvalQueue.getStrictPending(sessionKey);
-    if (strictPending.length > 0) {
-      const strictLines = strictPending
-        .map(
-          (p) =>
-            `${p.moduleName}.${p.methodName} requires ${p.confirmationToken || 'CONFIRM'} (${p.actionSummary || 'no summary'})`
-        )
-        .join(' | ');
-      logInterceptEvent({
-        eventType: 'approval_decision',
-        moduleName: 'ClawReins',
-        methodName: 'approval',
-        toolName: CLAWREINS_RESPOND_TOOL,
-        params,
-        approved: false,
-        decisionInput: 'yes',
-      });
-      return {
-        block: true,
-        blockReason:
-          `YES is not sufficient for high-irreversibility actions. ` +
-          `Use clawreins_respond({ decision: "confirm", confirmation: "<TOKEN>" }). ` +
-          `Pending: ${strictLines}`,
-      };
-    }
-
-    if (!approvalQueue.hasPending(sessionKey)) {
-      logger.info(`[${CLAWREINS_RESPOND_TOOL}] No pending approvals for session`, { sessionKey });
-      logInterceptEvent({
-        eventType: 'approval_decision',
-        moduleName: 'ClawReins',
-        methodName: 'approval',
-        toolName: CLAWREINS_RESPOND_TOOL,
-        params,
-        approved: false,
-        decisionInput: 'yes',
-      });
-      return { block: true, blockReason: 'No pending approvals to approve.' };
-    }
-    const count = approvalQueue.approve(sessionKey);
-    logger.info(`[${CLAWREINS_RESPOND_TOOL}] APPROVED`, { sessionKey, count });
-    logInterceptEvent({
-      eventType: 'approval_decision',
-      moduleName: 'ClawReins',
-      methodName: 'approval',
-      toolName: CLAWREINS_RESPOND_TOOL,
-      params,
-      approved: true,
-      decisionInput: 'yes',
-    });
-    return { block: true, blockReason: 'Approved. Retry the blocked tool.' };
-  }
-
-  if (decision === 'confirm') {
-    const confirmation =
-      typeof params.confirmation === 'string' ? params.confirmation.trim() : '';
-    if (!confirmation) {
-      logInterceptEvent({
-        eventType: 'approval_decision',
-        moduleName: 'ClawReins',
-        methodName: 'approval',
-        toolName: CLAWREINS_RESPOND_TOOL,
-        params,
-        approved: false,
-        decisionInput: 'confirm',
-      });
-      return {
-        block: true,
-        blockReason:
-          'Missing confirmation token. Use clawreins_respond({ decision: "confirm", confirmation: "CONFIRM-XXXXXX" }).',
-      };
-    }
-
-    const count = approvalQueue.confirm(sessionKey, confirmation);
-    if (count === 0) {
-      logInterceptEvent({
-        eventType: 'approval_decision',
-        moduleName: 'ClawReins',
-        methodName: 'approval',
-        toolName: CLAWREINS_RESPOND_TOOL,
-        params,
-        approved: false,
-        decisionInput: 'confirm',
-        confirmation,
-      });
-      return {
-        block: true,
-        blockReason: `No pending strict approvals matched token ${confirmation}.`,
-      };
-    }
-
-    logger.info(`[${CLAWREINS_RESPOND_TOOL}] EXPLICITLY_CONFIRMED`, {
-      sessionKey,
-      confirmation,
-      count,
-    });
-    logInterceptEvent({
-      eventType: 'approval_decision',
-      moduleName: 'ClawReins',
-      methodName: 'approval',
-      toolName: CLAWREINS_RESPOND_TOOL,
-      params,
-      approved: true,
-      decisionInput: 'confirm',
-      confirmation,
-    });
-    return { block: true, blockReason: 'Explicitly confirmed. Retry the blocked tool.' };
-  }
-
-  if (decision === 'no') {
-    const count = approvalQueue.deny(sessionKey);
-    trustRateLimiter.recordDenial(sessionKey);
-    logger.info(`[${CLAWREINS_RESPOND_TOOL}] DENIED`, { sessionKey, count });
-    logInterceptEvent({
-      eventType: 'approval_decision',
-      moduleName: 'ClawReins',
-      methodName: 'approval',
-      toolName: CLAWREINS_RESPOND_TOOL,
-      params,
-      approved: false,
-      decisionInput: 'no',
-    });
-    return { block: true, blockReason: 'Denied. Do NOT retry the blocked tool.' };
-  }
-
-  if (decision === 'allow') {
-    const strictPending = approvalQueue.getStrictPending(sessionKey);
-    if (strictPending.length > 0) {
-      logInterceptEvent({
-        eventType: 'approval_decision',
-        moduleName: 'ClawReins',
-        methodName: 'approval',
-        toolName: CLAWREINS_RESPOND_TOOL,
-        params,
-        approved: false,
-        decisionInput: 'allow',
-      });
-      return {
-        block: true,
-        blockReason:
-          'ALLOW is not permitted for high-irreversibility actions. Use explicit CONFIRM token.',
-      };
-    }
-
-    const pending = approvalQueue.getPendingActions(sessionKey);
-    if (pending.length === 0) {
-      logger.info(`[${CLAWREINS_RESPOND_TOOL}] No pending approvals for ALLOW`, { sessionKey });
-      logInterceptEvent({
-        eventType: 'approval_decision',
-        moduleName: 'ClawReins',
-        methodName: 'approval',
-        toolName: CLAWREINS_RESPOND_TOOL,
-        params,
-        approved: false,
-        decisionInput: 'allow',
-      });
-      return { block: true, blockReason: 'No pending approvals to allow.' };
-    }
-    for (const { moduleName, methodName } of pending) {
-      approvalQueue.allowFor(sessionKey, moduleName, methodName, BLANKET_DURATION_MS);
-    }
-    const count = approvalQueue.approve(sessionKey);
-    const rules = pending.map((p) => `${p.moduleName}.${p.methodName}`).join(', ');
-    logger.info(`[${CLAWREINS_RESPOND_TOOL}] ALLOW for 15 min`, { sessionKey, rules, count });
-    logInterceptEvent({
-      eventType: 'approval_decision',
-      moduleName: 'ClawReins',
-      methodName: 'approval',
-      toolName: CLAWREINS_RESPOND_TOOL,
-      params,
-      approved: true,
-      decisionInput: 'allow',
-    });
-    return { block: true, blockReason: `Approved for 15 minutes: ${rules}. Retry the blocked tool.` };
-  }
-
-  logger.warn(`[${CLAWREINS_RESPOND_TOOL}] Invalid decision: "${params.decision}"`, { sessionKey });
-  logInterceptEvent({
-    eventType: 'approval_decision',
-    moduleName: 'ClawReins',
-    methodName: 'approval',
-    toolName: CLAWREINS_RESPOND_TOOL,
-    params,
-    approved: false,
-    decisionInput: 'no',
-  });
-  return {
-    block: true,
-    blockReason: 'Invalid decision. Use "yes", "no", "allow", or "confirm".',
-  };
-}
 
 export function getToolMapping(): Record<string, { module: string; method: string }> {
   return { ...TOOL_TO_MODULE };
