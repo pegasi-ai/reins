@@ -4,6 +4,7 @@
  */
 
 import crypto from 'crypto';
+import path from 'path';
 import {
   SecurityPolicy,
   Decision,
@@ -18,6 +19,93 @@ import { StatsTracker } from '../storage/StatsTracker';
 import { trustRateLimiter } from './TrustRateLimiter';
 import { logger } from './Logger';
 import chalk from 'chalk';
+
+// ---------------------------------------------------------------------------
+// Path-policy helpers (no external dependency)
+// Supports: * (within a segment), ** (any depth), ? (single char)
+// ---------------------------------------------------------------------------
+
+function expandTilde(raw: string): string {
+  if (raw === '~' || raw.startsWith('~/') || raw.startsWith('~\\')) {
+    const home = process.env.HOME ?? process.env.USERPROFILE ?? '~';
+    return home + raw.slice(1);
+  }
+  return raw;
+}
+
+function matchesGlob(pattern: string, str: string): boolean {
+  const norm = str.replace(/\\/g, '/');
+  const pat = expandTilde(pattern).replace(/\\/g, '/');
+
+  const regex = pat
+    .replace(/[.+^${}()|[\]]/g, '\\$&') // escape regex specials
+    .replace(/\*\*/g, '\x00')            // placeholder for **
+    .replace(/\*/g, '[^/]*')             // * → any non-slash chars
+    .replace(/\?/g, '[^/]')              // ? → single non-slash char
+    .replace(/\/\x00/g, '(?:/.+)?')     // /** → slash + content optional (matches dir root)
+    .replace(/\x00/g, '.*');             // standalone ** → anything
+
+  return new RegExp(`^${regex}$`).test(norm);
+}
+
+/**
+ * Extract the path or URL that a tool call is targeting, for path-policy evaluation.
+ * Returns null if no target can be determined (policy check is skipped).
+ */
+function extractTarget(moduleName: string, params: Record<string, unknown>): string | null {
+  if (moduleName === 'Browser' || moduleName === 'Network') {
+    return (params.url ?? params.src ?? null) as string | null;
+  }
+  const raw = (params.path ?? params.file_path ?? params.target ?? null) as string | null;
+  if (!raw) return null;
+  // Expand ~ before resolving so ~/.ssh/id_rsa becomes /home/user/.ssh/id_rsa
+  return path.resolve(expandTilde(raw));
+}
+
+/**
+ * Apply allowPaths / denyPaths from the rule against the actual target.
+ * Returns a DENY rule if the path is out of bounds, otherwise returns the rule unchanged.
+ */
+function applyPathPolicy(
+  rule: SecurityRule,
+  moduleName: string,
+  args: unknown[]
+): SecurityRule {
+  if (!rule.allowPaths?.length && !rule.denyPaths?.length) return rule;
+
+  const params = (args[0] as Record<string, unknown>) ?? {};
+  const target = extractTarget(moduleName, params);
+
+  if (!target) {
+    // Path filtering is configured but no recognisable path param was found.
+    // Log a warning so this silent bypass is visible in the audit trail.
+    logger.warn(
+      `applyPathPolicy: path filtering configured for ${moduleName} but no target path found in params — filtering skipped`,
+      { params }
+    );
+    return rule;
+  }
+
+  // denyPaths take precedence over allowPaths.
+  if (rule.denyPaths?.some((p) => matchesGlob(p, target))) {
+    return {
+      action: 'DENY',
+      description: `Path "${target}" matches a denied pattern`,
+    };
+  }
+
+  // If allowPaths is set the target must match at least one entry.
+  if (rule.allowPaths?.length && !rule.allowPaths.some((p) => matchesGlob(p, target))) {
+    return {
+      action: 'DENY',
+      description: `Path "${target}" is not in the allowed paths list`,
+    };
+  }
+
+  return rule;
+}
+
+// ---------------------------------------------------------------------------
 
 export class Interceptor {
   private policy: SecurityPolicy;
@@ -46,7 +134,11 @@ export class Interceptor {
     sessionKey?: string,
     intervention?: InterventionMetadata
   ): Promise<void> {
-    const originalRule = this.lookupRule(moduleName, methodName);
+    const baseRule = this.lookupRule(moduleName, methodName);
+    // Path-policy check runs before intervention so a denied path is never
+    // upgradeable to ASK — it's a hard DENY.
+    const originalRule = applyPathPolicy(baseRule, moduleName, args);
+
     const normalizedIntervention = this.normalizeIntervention(
       moduleName,
       methodName,
@@ -86,8 +178,7 @@ export class Interceptor {
 
         throw new Error(
           `[ClawReins:APPROVAL_REQUIRED] ${moduleName}.${methodName}() is blocked pending human approval. ` +
-            `Risk: ${detail}
-` +
+            `Risk: ${detail}\n` +
             instructions
         );
       }

@@ -17,6 +17,18 @@ export type Decision = 'ALLOW' | 'DENY' | 'ASK';
 export interface SecurityRule {
   action: Decision;
   description?: string; // Optional reasoning for logs and UI
+  /**
+   * Glob patterns for allowed paths/URLs.
+   * If set, the target path/URL MUST match at least one pattern or the call is DENIED.
+   * Examples: ["/workspace/**", "/tmp/**"], ["https://api.example.com/**"]
+   */
+  allowPaths?: string[];
+  /**
+   * Glob patterns for denied paths/URLs.
+   * If the target path/URL matches ANY of these, the call is DENIED regardless of allowPaths.
+   * Examples: ["/etc/GLOB", "~/.ssh/GLOB", "GLOB/.env"]  (GLOB = **)
+   */
+  denyPaths?: string[];
 }
 
 /**
