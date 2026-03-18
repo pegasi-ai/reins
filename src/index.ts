@@ -28,7 +28,6 @@ export {
   createToolCallHook,
   getToolMapping,
   getProtectedModules,
-  CLAWREINS_RESPOND_TOOL,
 } from './plugin/tool-interceptor';
 
 export {

@@ -25,10 +25,10 @@ export class Interceptor {
   private logEnabled: boolean;
 
   /**
-   * Set to true when api.registerTool() succeeded for clawreins_respond.
-   * Controls channel-mode approval instructions sent to the LLM.
+   * Optional callback fired (fire-and-forget) when a tool is blocked in channel mode.
+   * The plugin sets this to send an OOB approval notification to the human.
    */
-  public respondToolAvailable = false;
+  public onBlockCallback?: (sessionKey: string, moduleName: string, methodName: string) => void;
 
   constructor(policy?: SecurityPolicy, logEnabled: boolean = true) {
     this.policy = policy || DEFAULT_POLICY;
@@ -175,9 +175,7 @@ export class Interceptor {
     intervention?: InterventionMetadata
   ): string {
     const strict = intervention?.requiresExplicitConfirmation === true;
-    const requiresRespondToolApproval = intervention?.requiresRespondToolApproval === true;
     const summary = intervention?.actionSummary || `${moduleName}.${methodName}()`;
-    const token = intervention?.confirmationToken || 'CONFIRM';
 
     const screenshotInstruction = intervention?.recommendScreenshotReview
       ? 'Before asking for approval, call screenshot() and use existing vision reasoning on the image. ' +
@@ -185,47 +183,20 @@ export class Interceptor {
       : '';
 
     if (strict) {
-      if (!this.respondToolAvailable) {
-        return (
-          `${screenshotInstruction}` +
-          `Strict confirmation is required but clawreins_respond is unavailable in this gateway. ` +
-          `Do NOT execute ${moduleName}.${methodName}().`
-        );
-      }
-
       return (
         `${screenshotInstruction}` +
-        `This action is HIGH IRREVERSIBILITY and requires explicit confirmation.\n` +
-        `Action summary: ${summary}\n` +
-        `Ask the user to type exactly: ${token}\n` +
-        `Then call clawreins_respond({ decision: "confirm", confirmation: "${token}" }), then retry.`
-      );
-    }
-
-    if (requiresRespondToolApproval && !this.respondToolAvailable) {
-      return (
-        `${screenshotInstruction}` +
-        `This destructive action requires explicit channel approval via clawreins_respond, ` +
-        `but that tool is unavailable in this gateway. Do NOT execute ${moduleName}.${methodName}().`
-      );
-    }
-
-    if (this.respondToolAvailable) {
-      return (
-        `${screenshotInstruction}` +
-        `Action summary: ${summary}\n` +
-        `Ask the user: YES, NO, or ALLOW (auto-approve for 15 min).\n` +
-        `- YES → clawreins_respond({ decision: "yes" }), then retry.\n` +
-        `- NO → clawreins_respond({ decision: "no" }). Do NOT retry.\n` +
-        `- ALLOW → clawreins_respond({ decision: "allow" }), then retry. Auto-approves this action for 15 minutes.`
+        `⚠️ HIGH-RISK action requires explicit human confirmation.\n` +
+        `Action: ${summary}\n` +
+        `An out-of-band approval notification has been sent to the human.\n` +
+        `WAIT — do NOT retry this tool. Do NOT attempt to self-approve.`
       );
     }
 
     return (
       `${screenshotInstruction}` +
-      `Ask the user YES or NO.\n` +
-      `- If YES: call ${moduleName}.${methodName}() again exactly as before.\n` +
-      `- If NO: do NOT call the tool again. Tell the user the action was cancelled.`
+      `Action: ${summary}\n` +
+      `An approval request has been sent to the human out-of-band.\n` +
+      `WAIT for their response before retrying. Do NOT attempt to self-approve.`
     );
   }
 
@@ -289,16 +260,19 @@ export class Interceptor {
           rule,
           sessionKey,
           intervention,
-          respondToolAvailable: this.respondToolAvailable,
         };
 
         const approved = await this.arbitrator.judge(context);
         const decisionTime = Date.now() - startTime;
 
-        // Record TTY denials for cooldown escalation.
-        // Channel denials are recorded separately in handleRespondTool.
-        if (!approved && process.stdin.isTTY) {
-          trustRateLimiter.recordDenial(sessionKey || 'tty');
+        if (!approved) {
+          if (process.stdin.isTTY) {
+            // TTY: record denial for cooldown escalation.
+            trustRateLimiter.recordDenial(sessionKey || 'tty');
+          } else if (sessionKey && this.onBlockCallback) {
+            // Channel mode: fire OOB notification (non-blocking).
+            this.onBlockCallback(sessionKey, moduleName, methodName);
+          }
         }
 
         await this.logDecision({

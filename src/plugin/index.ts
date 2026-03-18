@@ -6,13 +6,22 @@
  * ignores async plugin registration (the returned promise is not awaited).
  *
  * Hooks:
- *  before_tool_call → api.on() (tool interception)
+ *  before_tool_call      → tool interception (policy evaluation)
+ *  message_received      → capture channel context (from/channelId) for OOB notifications
+ *  before_message_write  → correlate sessionKey to channel context
+ *
+ * Commands:
+ *  !approve <TOKEN>  → approve pending action (processed before LLM, agent never sees it)
+ *  !deny    <TOKEN>  → deny pending action
  */
 
 import { Interceptor } from '../core/Interceptor';
 import { PolicyStore } from '../storage/PolicyStore';
 import { logger } from '../core/Logger';
-import { createToolCallHook, CLAWREINS_RESPOND_TOOL } from './tool-interceptor';
+import { createToolCallHook } from './tool-interceptor';
+import { channelContextStore } from './ChannelContextStore';
+import { initNotifier, sendApprovalNotification } from './oob-notifier';
+import { createApproveCommand, createDenyCommand } from './approval-commands';
 import path from 'path';
 import { readFileSync } from 'fs';
 
@@ -49,68 +58,55 @@ export const ClawReinsManifest: ClawReinsPluginManifest = {
   },
 };
 
-/**
- * OpenClaw plugin API surface used by ClawReins.
- * Both methods are optional — the gateway may not support all of them.
- */
+// ---------------------------------------------------------------------------
+// Minimal OpenClaw plugin API surface used by ClawReins.
+// All methods are optional — the gateway may not support all of them.
+// ---------------------------------------------------------------------------
+
+interface OobRuntimeChannel {
+  channel?: {
+    whatsapp?: {
+      sendMessageWhatsApp?: (
+        to: string,
+        body: string,
+        opts: { verbose?: boolean; cfg?: unknown; accountId?: string }
+      ) => Promise<unknown>;
+    };
+    telegram?: {
+      sendMessageTelegram?: (
+        to: string,
+        text: string,
+        opts: { cfg?: unknown; accountId?: string }
+      ) => Promise<unknown>;
+    };
+  };
+}
+
 interface OpenClawPluginApi {
-  on?(hookName: string, handler: (...args: unknown[]) => void): void;
-  registerTool?(spec: {
+  config?: unknown;
+  runtime?: OobRuntimeChannel;
+  on?(
+    hookName: string,
+    handler: (...args: unknown[]) => unknown,
+    opts?: { priority?: number }
+  ): void;
+  registerCommand?(command: {
     name: string;
     description: string;
-    parameters: Record<string, unknown>;
-    execute: (...args: unknown[]) => Promise<unknown>;
+    acceptsArgs?: boolean;
+    requireAuth?: boolean;
+    handler: (ctx: unknown) => unknown;
   }): void;
 }
 
-/**
- * Attempt to register the clawreins_respond tool via api.registerTool().
- * Returns true if the call succeeded, false if the API is not available.
- */
-function tryRegisterTool(api: OpenClawPluginApi): boolean {
-  try {
-    if (!api.registerTool) {
-      logger.info('[plugin] api.registerTool not available — fallback retry-as-approval');
-      return false;
-    }
-    api.registerTool({
-      name: CLAWREINS_RESPOND_TOOL,
-      description: 'Respond to a ClawReins security prompt. Call after the user says YES, NO, ALLOW, or provides CONFIRM token.',
-      parameters: {
-        type: 'object',
-        properties: {
-          decision: {
-            type: 'string',
-            enum: ['yes', 'no', 'allow', 'confirm'],
-            description: 'The user decision: yes/no/allow, or confirm for strict irreversibility actions.',
-          },
-          confirmation: {
-            type: 'string',
-            description: 'Required when decision=confirm. Example: CONFIRM-ABC123',
-          },
-        },
-        required: ['decision'],
-      },
-      // The actual logic runs in before_tool_call (tool-interceptor.ts).
-      // This execute handler exists only because the gateway requires it.
-      execute: async () => ({ result: 'Handled by ClawReins hook.' }),
-    });
-    logger.info(`[plugin] Registered tool: ${CLAWREINS_RESPOND_TOOL}`);
-    return true;
-  } catch (err) {
-    logger.warn(`[plugin] api.registerTool() threw`, { error: err });
-    return false;
-  }
-}
+// ---------------------------------------------------------------------------
+// Hook registration helpers
+// ---------------------------------------------------------------------------
 
-/**
- * Safely attempt to register a hook via api.on().
- * Returns true if the call succeeded (no throw), false otherwise.
- */
 function tryOn(
   api: OpenClawPluginApi,
   hookName: string,
-  handler: (...args: unknown[]) => void,
+  handler: (...args: unknown[]) => unknown,
   label: string
 ): boolean {
   try {
@@ -119,13 +115,59 @@ function tryOn(
       return false;
     }
     api.on(hookName, handler);
-    logger.info(`[plugin] ${label}: api.on('${hookName}') succeeded`);
+    logger.info(`[plugin] ${label}: registered`);
     return true;
   } catch (err) {
     logger.warn(`[plugin] ${label}: api.on('${hookName}') threw`, { error: err });
     return false;
   }
 }
+
+function tryRegisterCommand(
+  api: OpenClawPluginApi,
+  command: {
+    name: string;
+    description: string;
+    acceptsArgs?: boolean;
+    requireAuth?: boolean;
+    handler: (ctx: unknown) => unknown;
+  },
+  label: string
+): boolean {
+  try {
+    if (!api.registerCommand) {
+      logger.debug(`[plugin] ${label}: api.registerCommand not available`);
+      return false;
+    }
+    api.registerCommand(command);
+    logger.info(`[plugin] ${label}: registered command !${command.name}`);
+    return true;
+  } catch (err) {
+    logger.warn(`[plugin] ${label}: api.registerCommand threw`, { error: err });
+    return false;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Text extraction helper for before_message_write correlation
+// ---------------------------------------------------------------------------
+
+function extractMessageText(
+  content: unknown
+): string | undefined {
+  if (typeof content === 'string') return content;
+  if (Array.isArray(content)) {
+    const block = (content as Array<{ type?: string; text?: string }>).find(
+      (b) => b.type === 'text'
+    );
+    return block?.text;
+  }
+  return undefined;
+}
+
+// ---------------------------------------------------------------------------
+// Plugin registration
+// ---------------------------------------------------------------------------
 
 export default {
   id: 'clawreins',
@@ -144,23 +186,92 @@ export default {
 
       const interceptor = new Interceptor(policy);
 
-      // -----------------------------------------------------------------------
-      // Hook: before_tool_call — tool interception
-      // -----------------------------------------------------------------------
+      // -------------------------------------------------------------------
+      // OOB notifier: initialise with runtime send functions + gateway config
+      // -------------------------------------------------------------------
+      if (api.runtime) {
+        initNotifier(api.runtime, api.config);
+      }
+
+      // Wire the notifier callback so Interceptor can trigger notifications.
+      interceptor.onBlockCallback = (sessionKey, moduleName, methodName) => {
+        void sendApprovalNotification(sessionKey, moduleName, methodName);
+      };
+
+      // -------------------------------------------------------------------
+      // Hook: before_tool_call — policy evaluation
+      // -------------------------------------------------------------------
       const toolHook = createToolCallHook(interceptor);
-      tryOn(api, 'before_tool_call', toolHook as (...args: unknown[]) => void, 'before_tool_call');
+      tryOn(
+        api,
+        'before_tool_call',
+        toolHook as (...args: unknown[]) => unknown,
+        'before_tool_call'
+      );
 
-      // -----------------------------------------------------------------------
-      // Tool registration: clawreins_respond
-      // If available, the LLM sees this tool and calls it with { decision: "yes"|"no"|"allow"|"confirm" }.
-      // The actual logic is intercepted in before_tool_call (tool-interceptor.ts).
-      // -----------------------------------------------------------------------
-      const toolRegistered = tryRegisterTool(api);
-      interceptor.respondToolAvailable = toolRegistered;
+      // -------------------------------------------------------------------
+      // Hook: message_received — capture channel context for notifications
+      // Fires for every inbound message; populates the ring buffer.
+      // -------------------------------------------------------------------
+      tryOn(
+        api,
+        'message_received',
+        (
+          event: unknown,
+          ctx: unknown
+        ) => {
+          const e = event as { from?: string; content?: string };
+          const c = ctx as { channelId?: string; accountId?: string };
+          if (e.from && typeof e.content === 'string' && c.channelId) {
+            channelContextStore.onMessageReceived(e.from, e.content, c.channelId, c.accountId);
+          }
+        },
+        'message_received'
+      );
 
-      logger.info('ClawReins: hook registration complete', {
-        respondToolAvailable: toolRegistered,
-      });
+      // -------------------------------------------------------------------
+      // Hook: before_message_write — bind sessionKey to channel context
+      // Fires synchronously before a message is written to the JSONL transcript.
+      // We use it to correlate sessionKey ↔ channelInfo via message content.
+      // -------------------------------------------------------------------
+      tryOn(
+        api,
+        'before_message_write',
+        (
+          event: unknown,
+          ctx: unknown
+        ) => {
+          const e = event as { message?: { role?: string; content?: unknown }; sessionKey?: string };
+          const c = ctx as { sessionKey?: string };
+          const sessionKey = c.sessionKey ?? e.sessionKey;
+          if (sessionKey && e.message?.role === 'user') {
+            const text = extractMessageText(e.message.content);
+            if (text) {
+              channelContextStore.onBeforeMessageWrite(sessionKey, text);
+            }
+          }
+          // Return nothing — don't block the message.
+        },
+        'before_message_write'
+      );
+
+      // -------------------------------------------------------------------
+      // Commands: !approve / !deny — intercepted before the LLM
+      // -------------------------------------------------------------------
+      // Cast needed: our CommandDefinition handler is typed (ctx: CommandContext) while
+      // the gateway interface uses (ctx: unknown). Safe — the gateway passes the full context.
+      tryRegisterCommand(
+        api,
+        createApproveCommand() as Parameters<typeof tryRegisterCommand>[1],
+        'approve-command'
+      );
+      tryRegisterCommand(
+        api,
+        createDenyCommand() as Parameters<typeof tryRegisterCommand>[1],
+        'deny-command'
+      );
+
+      logger.info('ClawReins: registration complete');
     } catch (error) {
       logger.error('Failed to initialize ClawReins plugin', { error });
       throw error;

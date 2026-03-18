@@ -284,6 +284,58 @@ export class ApprovalQueue {
   }
 
   // ---------------------------------------------------------------------------
+  // Out-of-band token resolution
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Resolve any pending entry (strict or non-strict) that has the given token.
+   * Used by the !approve / !deny commands so the human can approve from their channel.
+   */
+  resolveByToken(token: string, decision: 'approve' | 'deny'): boolean {
+    this.maybeCleanup();
+    const normalized = token.trim().toUpperCase();
+
+    for (const [k, entry] of this.entries) {
+      if (entry.status !== 'pending' || Date.now() >= entry.expiresAt) continue;
+      const entryToken = (entry.confirmationToken || '').trim().toUpperCase();
+      if (!entryToken || entryToken !== normalized) continue;
+
+      if (decision === 'approve') {
+        entry.status = 'approved';
+        entry.expiresAt = Date.now() + this.ttl;
+        logger.info('ApprovalQueue: resolved (approved) by token', {
+          token: normalized,
+          action: `${entry.moduleName}.${entry.methodName}`,
+        });
+      } else {
+        this.entries.delete(k);
+        logger.info('ApprovalQueue: resolved (denied) by token', {
+          token: normalized,
+          action: `${entry.moduleName}.${entry.methodName}`,
+        });
+      }
+      return true;
+    }
+    return false;
+  }
+
+  /**
+   * Return token + summary for a pending entry in one call.
+   * Used by the OOB notifier to build the notification message sent to the human.
+   */
+  getNotificationInfo(
+    sessionKey: string,
+    moduleName: string,
+    methodName: string
+  ): { token: string; summary?: string } | undefined {
+    const k = this.key(sessionKey, moduleName, methodName);
+    const entry = this.entries.get(k);
+    if (!entry || entry.status !== 'pending' || Date.now() >= entry.expiresAt) return undefined;
+    if (!entry.confirmationToken) return undefined;
+    return { token: entry.confirmationToken, summary: entry.actionSummary };
+  }
+
+  // ---------------------------------------------------------------------------
   // Blanket allows (time-limited auto-approve)
   // ---------------------------------------------------------------------------
 

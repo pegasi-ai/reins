@@ -77,6 +77,4 @@ export interface ExecutionContext {
   /** OpenClaw session key (e.g. "agent:main:whatsapp:dm:+1555…"). Present in daemon/channel mode. */
   sessionKey?: string;
   intervention?: InterventionMetadata;
-  /** Whether clawreins_respond tool is available in this gateway runtime. */
-  respondToolAvailable?: boolean;
 }
