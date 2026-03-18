@@ -159,10 +159,12 @@ async function modifyRule(policy: PersistedPolicy): Promise<void> {
     },
   ]);
 
-  const parseGlobs = (raw: string): string[] | undefined => {
-    const list = raw.split(',').map((s: string) => s.trim()).filter(Boolean);
-    return list.length ? list : undefined;
-  };
+    {
+      type: 'input',
+      name: 'newAllowPaths',
+      message: 'Allowed path patterns (comma-separated globs, leave empty to allow all):\n  Note: paths containing commas must be edited directly in the JSON policy file.',
+      default: currentRule.allowPaths?.join(', ') || '',
+    },
 
   policy.modules[moduleName][methodName] = {
     action: newAction,
