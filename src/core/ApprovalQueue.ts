@@ -320,6 +320,38 @@ export class ApprovalQueue {
   }
 
   /**
+   * Return the sessionKey for any pending entry that has the given token.
+   * Used by the approve command to know which session to signal after approval.
+   */
+  getSessionKeyByToken(token: string): string | undefined {
+    const normalized = token.trim().toUpperCase();
+    for (const entry of this.entries.values()) {
+      if (entry.status !== 'pending' && entry.status !== 'approved') continue;
+      if (Date.now() >= entry.expiresAt) continue;
+      const entryToken = (entry.confirmationToken || '').trim().toUpperCase();
+      if (entryToken === normalized) return entry.sessionKey;
+    }
+    return undefined;
+  }
+
+  /**
+   * Return action info for the approved entry matching a token.
+   * Used by sendRetrySignal to build a specific retry message for the agent.
+   */
+  getApprovedInfo(token: string): { moduleName: string; methodName: string; actionSummary?: string } | undefined {
+    const normalized = token.trim().toUpperCase();
+    for (const entry of this.entries.values()) {
+      if (entry.status !== 'approved') continue;
+      if (Date.now() >= entry.expiresAt) continue;
+      const entryToken = (entry.confirmationToken || '').trim().toUpperCase();
+      if (entryToken === normalized) {
+        return { moduleName: entry.moduleName, methodName: entry.methodName, actionSummary: entry.actionSummary };
+      }
+    }
+    return undefined;
+  }
+
+  /**
    * Return token + summary for a pending entry in one call.
    * Used by the OOB notifier to build the notification message sent to the human.
    */
@@ -333,6 +365,58 @@ export class ApprovalQueue {
     if (!entry || entry.status !== 'pending' || Date.now() >= entry.expiresAt) return undefined;
     if (!entry.confirmationToken) return undefined;
     return { token: entry.confirmationToken, summary: entry.actionSummary };
+  }
+
+  /**
+   * Stall the caller until the entry is approved, denied, or times out.
+   * Polls every 500 ms. Returns true if approved, false otherwise.
+   */
+  waitForApproval(
+    sessionKey: string,
+    moduleName: string,
+    methodName: string,
+    timeoutMs: number = DEFAULT_TTL_MS
+  ): Promise<boolean> {
+    const k = this.key(sessionKey, moduleName, methodName);
+    const deadline = Date.now() + timeoutMs;
+
+    return new Promise<boolean>((resolve) => {
+      const tick = (): void => {
+        const entry = this.entries.get(k);
+
+        if (!entry || Date.now() >= entry.expiresAt) {
+          logger.info('ApprovalQueue: stall ended — expired or removed', {
+            sessionKey,
+            action: `${moduleName}.${methodName}`,
+          });
+          resolve(false);
+          return;
+        }
+
+        if (entry.status === 'approved') {
+          this.entries.delete(k);
+          logger.info('ApprovalQueue: stall resolved (approved)', {
+            sessionKey,
+            action: `${moduleName}.${methodName}`,
+          });
+          resolve(true);
+          return;
+        }
+
+        if (Date.now() >= deadline) {
+          logger.info('ApprovalQueue: stall timed out', {
+            sessionKey,
+            action: `${moduleName}.${methodName}`,
+          });
+          resolve(false);
+          return;
+        }
+
+        setTimeout(tick, 500);
+      };
+
+      setTimeout(tick, 500);
+    });
   }
 
   // ---------------------------------------------------------------------------

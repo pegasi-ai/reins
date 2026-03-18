@@ -1,12 +1,12 @@
 /**
  * ClawReins approval commands
  *
- * Registers !approve and !deny as plugin commands.
+ * Registers /approve and /deny as plugin commands.
  * OpenClaw routes these BEFORE the LLM loop, so the agent never sees them.
  *
  * Usage:
- *   !approve CONFIRM-AB12CD   → approves the pending action with that token
- *   !deny CONFIRM-AB12CD      → denies the pending action with that token
+ *   /approve CONFIRM-AB12CD   → approves the pending action with that token
+ *   /deny CONFIRM-AB12CD      → denies the pending action with that token
  */
 
 import { approvalQueue } from '../core/ApprovalQueue';
@@ -43,7 +43,7 @@ export interface CommandDefinition {
 export function createApproveCommand(): CommandDefinition {
   return {
     name: 'approve',
-    description: 'Approve a pending ClawReins action. Usage: !approve <TOKEN>',
+    description: 'Approve a pending ClawReins action. Usage: /approve <TOKEN>',
     acceptsArgs: true,
     requireAuth: true,
     handler(ctx: CommandContext): CommandResult {
@@ -54,7 +54,7 @@ export function createApproveCommand(): CommandDefinition {
       const token = ctx.args?.trim().toUpperCase();
       if (!token) {
         return {
-          text: '⚠️ Usage: !approve <TOKEN>\nExample: !approve CONFIRM-AB12CD',
+          text: '⚠️ Usage: /approve <TOKEN>\nExample: /approve CONFIRM-AB12CD',
           isError: true,
         };
       }
@@ -76,7 +76,7 @@ export function createApproveCommand(): CommandDefinition {
 export function createDenyCommand(): CommandDefinition {
   return {
     name: 'deny',
-    description: 'Deny a pending ClawReins action. Usage: !deny <TOKEN>',
+    description: 'Deny a pending ClawReins action. Usage: /deny <TOKEN>',
     acceptsArgs: true,
     requireAuth: true,
     handler(ctx: CommandContext): CommandResult {
@@ -87,7 +87,7 @@ export function createDenyCommand(): CommandDefinition {
       const token = ctx.args?.trim().toUpperCase();
       if (!token) {
         return {
-          text: '⚠️ Usage: !deny <TOKEN>\nExample: !deny CONFIRM-AB12CD',
+          text: '⚠️ Usage: /deny <TOKEN>\nExample: /deny CONFIRM-AB12CD',
           isError: true,
         };
       }

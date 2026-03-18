@@ -75,13 +75,18 @@ export async function sendApprovalNotification(
   const message = [
     '🛡️ ClawReins: approval needed',
     `Action: ${actionLine}`,
-    `Reply  !approve ${info.token}  to allow`,
-    `       !deny ${info.token}  to block`,
+    `/approve ${info.token}  to allow`,
+    `/deny ${info.token}  to block`,
   ].join('\n');
 
   await dispatch(channelInfo.channelId, channelInfo.from, channelInfo.accountId, message);
 }
 
+/**
+ * Send a follow-up message to the agent's session so it retries the approved action.
+ * Since selfChatMode=true, a message sent to the user's own number arrives as an
+ * inbound user message that the agent sees and will act on.
+ */
 // ---------------------------------------------------------------------------
 // Internal dispatcher
 // ---------------------------------------------------------------------------

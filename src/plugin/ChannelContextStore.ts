@@ -38,22 +38,48 @@ export class ChannelContextStore {
 
   /**
    * Called from the `message_received` hook.
-   * Stores channel context so it can be matched to a sessionKey.
+   *
+   * Primary path: if `conversationId` is provided, derive the sessionKey directly
+   * as `agent:main:<conversationId>` (matches OpenClaw's per-channel-peer dmScope)
+   * and store immediately — no before_message_write correlation needed.
+   *
+   * Fallback path: push into the ring buffer for content-based correlation via
+   * onBeforeMessageWrite (covers edge cases where conversationId isn't available).
    */
-  onMessageReceived(from: string, content: string, channelId: string, accountId?: string): void {
+  onMessageReceived(
+    from: string,
+    content: string,
+    channelId: string,
+    accountId?: string,
+    conversationId?: string
+  ): void {
+    const info: ChannelInfo = { from, channelId, accountId };
+
+    // Primary: derive sessionKey directly from channelId + from.
+    // Covers the common per-channel-peer dmScope:
+    //   agent:main:<channelId>:direct:<from>
+    // e.g. agent:main:whatsapp:direct:+16505861109
+    this.resolved.set(`agent:main:${channelId}:direct:${from}`, info);
+
+    // Secondary: if conversationId is available, also store by that.
+    if (conversationId) {
+      this.resolved.set(`agent:main:${conversationId}`, info);
+    }
+
+    // Fallback ring buffer for content-based correlation via onBeforeMessageWrite.
     const now = Date.now();
     this.pending = this.pending.filter((e) => now - e.ts < PENDING_TTL_MS);
     if (this.pending.length >= MAX_PENDING) {
       this.pending.shift();
     }
-    this.pending.push({ info: { from, channelId, accountId }, content, ts: now });
+    this.pending.push({ info, content, ts: now });
   }
 
   /**
    * Called from the `before_message_write` hook for user (role="user") messages.
-   * Correlates the message text to a pending entry and binds it to the sessionKey.
+   * Fallback correlation: matches message text to a pending ring-buffer entry.
    */
-  onBeforeMessageWrite(sessionKey: string, messageText: string): void {
+  onBeforeMessageWrite(sessionKey: string, messageText: string): boolean {
     const now = Date.now();
     const idx = this.pending.findIndex(
       (e) => e.content === messageText && now - e.ts < PENDING_TTL_MS
@@ -61,7 +87,9 @@ export class ChannelContextStore {
     if (idx !== -1) {
       this.resolved.set(sessionKey, this.pending[idx].info);
       this.pending.splice(idx, 1);
+      return true;
     }
+    return false;
   }
 
   /** Returns the most recently seen channel info for a session. */

@@ -88,6 +88,7 @@ export function createToolCallHook(
   return async (event, ctx): Promise<BeforeToolCallResult | void> => {
     const { toolName } = event;
 
+    try {
     const mapping = TOOL_TO_MODULE[toolName.toLowerCase()];
     const moduleName = mapping?.module ?? 'Unknown';
     const methodName = mapping?.method ?? toolName;
@@ -216,6 +217,16 @@ export function createToolCallHook(
         });
       }
       return { block: true, blockReason: reason };
+    }
+    } catch (unexpectedErr: unknown) {
+      // Outer fail-closed guard: any unhandled error in the hook (outside the inner
+      // try/catch) must block the tool, not allow it. OpenClaw's hook runner is
+      // fail-open — it catches hook exceptions and returns { blocked: false }.
+      logger.error(`[tool-interceptor] Unexpected error — blocking ${toolName} (fail-closed)`, {
+        error: unexpectedErr,
+        toolName,
+      });
+      return { block: true, blockReason: `ClawReins: unexpected hook error (fail-closed)` };
     }
   };
 }

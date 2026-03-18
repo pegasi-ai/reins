@@ -351,20 +351,17 @@ export class Interceptor {
           rule,
           sessionKey,
           intervention,
+          onBlockCallback: this.onBlockCallback,
         };
 
         const approved = await this.arbitrator.judge(context);
         const decisionTime = Date.now() - startTime;
 
-        if (!approved) {
-          if (process.stdin.isTTY) {
-            // TTY: record denial for cooldown escalation.
-            trustRateLimiter.recordDenial(sessionKey || 'tty');
-          } else if (sessionKey && this.onBlockCallback) {
-            // Channel mode: fire OOB notification (non-blocking).
-            this.onBlockCallback(sessionKey, moduleName, methodName);
-          }
+        if (!approved && process.stdin.isTTY) {
+          // TTY: record denial for cooldown escalation.
+          trustRateLimiter.recordDenial(sessionKey || 'tty');
         }
+        // Channel mode: onBlockCallback is called inside judgeChannel() before stalling.
 
         await this.logDecision({
           timestamp: new Date().toISOString(),

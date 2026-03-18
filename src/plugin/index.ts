@@ -220,11 +220,22 @@ export default {
           event: unknown,
           ctx: unknown
         ) => {
-          const e = event as { from?: string; content?: string };
-          const c = ctx as { channelId?: string; accountId?: string };
-          if (e.from && typeof e.content === 'string' && c.channelId) {
-            channelContextStore.onMessageReceived(e.from, e.content, c.channelId, c.accountId);
+          // OpenClaw may put channelId/accountId on event or ctx depending on version.
+          const e = event as { from?: string; content?: string; channelId?: string; accountId?: string };
+          const c = (ctx ?? {}) as { channelId?: string; accountId?: string; conversationId?: string };
+          const channelId = c.channelId ?? e.channelId;
+          const accountId = c.accountId ?? e.accountId;
+          const conversationId = c.conversationId;
+          if (!e.from || typeof e.content !== 'string' || !channelId) {
+            logger.warn('[plugin] message_received: missing fields, skipping', {
+              hasFrom: !!e.from,
+              hasContent: typeof e.content === 'string',
+              hasChannelId: !!channelId,
+            });
+            return;
           }
+          channelContextStore.onMessageReceived(e.from, e.content, channelId, accountId, conversationId);
+          logger.info('[plugin] message_received: stored channel context', { from: e.from, channelId, conversationId });
         },
         'message_received'
       );
@@ -241,16 +252,22 @@ export default {
           event: unknown,
           ctx: unknown
         ) => {
-          const e = event as { message?: { role?: string; content?: unknown }; sessionKey?: string };
-          const c = ctx as { sessionKey?: string };
+          // sessionKey may be on ctx or directly on event depending on OpenClaw version.
+          const e = event as { message?: { role?: string; content?: unknown }; sessionKey?: string; role?: string; content?: unknown };
+          const c = (ctx ?? {}) as { sessionKey?: string };
           const sessionKey = c.sessionKey ?? e.sessionKey;
-          if (sessionKey && e.message?.role === 'user') {
-            const text = extractMessageText(e.message.content);
+          // Handle both {message: {role, content}} and flat {role, content} shapes.
+          const role = e.message?.role ?? e.role;
+          const content = e.message?.content ?? e.content;
+          if (sessionKey && role === 'user') {
+            const text = extractMessageText(content);
             if (text) {
-              channelContextStore.onBeforeMessageWrite(sessionKey, text);
+              const matched = channelContextStore.onBeforeMessageWrite(sessionKey, text);
+              if (matched) {
+                logger.info('[plugin] before_message_write: correlated', { sessionKey });
+              }
             }
           }
-          // Return nothing — don't block the message.
         },
         'before_message_write'
       );

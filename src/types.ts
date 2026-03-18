@@ -89,4 +89,6 @@ export interface ExecutionContext {
   /** OpenClaw session key (e.g. "agent:main:whatsapp:dm:+1555…"). Present in daemon/channel mode. */
   sessionKey?: string;
   intervention?: InterventionMetadata;
+  /** Called once when a tool is blocked to fire the OOB approval notification. */
+  onBlockCallback?: (sessionKey: string, moduleName: string, methodName: string) => void;
 }
