@@ -14,6 +14,25 @@
         "enum": ["ALLOW", "DENY", "ASK"],
         "default": "ASK",
         "description": "Default action for unknown tools"
+      },
+      "fallbackChannel": {
+        "type": "object",
+        "description": "Channel to notify when no session channel context exists (e.g. TUI sessions)",
+        "additionalProperties": false,
+        "required": ["channelId", "to"],
+        "properties": {
+          "channelId": {
+            "type": "string",
+            "enum": ["whatsapp", "telegram"]
+          },
+          "to": {
+            "type": "string",
+            "description": "Phone number or chat ID to send approval notifications to"
+          },
+          "accountId": {
+            "type": "string"
+          }
+        }
       }
     }
   }

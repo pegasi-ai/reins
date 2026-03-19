@@ -104,16 +104,9 @@ export class Arbitrator {
     return approved;
   }
 
-  private judgeChannel(context: ExecutionContext): boolean {
+  private async judgeChannel(context: ExecutionContext): Promise<boolean> {
     const { sessionKey, moduleName, methodName } = context;
     const strict = context.intervention?.requiresExplicitConfirmation === true;
-
-    if (!strict && approvalQueue.hasBlanketAllow(sessionKey!, moduleName, methodName)) {
-      logger.info(`ASK policy → auto-approved (blanket allow): ${moduleName}.${methodName}()`, {
-        sessionKey,
-      });
-      return true;
-    }
 
     if (approvalQueue.consume(sessionKey!, moduleName, methodName)) {
       logger.info(`ASK policy → approved via channel: ${moduleName}.${methodName}()`, {
@@ -122,7 +115,7 @@ export class Arbitrator {
       return true;
     }
 
-    // Always assign a token so the OOB notifier can reference it in the !approve message.
+    // Always assign a token so the OOB notifier can reference it in the /approve message.
     const token =
       context.intervention?.confirmationToken || this.generateChannelToken(moduleName, methodName);
 
@@ -130,16 +123,41 @@ export class Arbitrator {
       requiresExplicitConfirmation: strict,
       actionSummary: context.intervention?.actionSummary,
       confirmationToken: token,
-      // Retry-as-approval is disabled: approval must come from !approve <token>.
       allowRetryAsApproval: false,
     });
 
-    logger.info(`ASK policy → awaiting OOB channel approval: ${moduleName}.${methodName}()`, {
+    // Fire OOB notification immediately (sends WhatsApp/Telegram message to human).
+    // If onBlockCallback is absent, or it returns false (no channel context / send failure),
+    // auto-deny immediately rather than stalling for the full TTL.
+    if (!context.onBlockCallback) {
+      approvalQueue.resolveByToken(token, 'deny');
+      logger.info(
+        `ASK policy → auto-denied (no onBlockCallback configured): ${moduleName}.${methodName}()`,
+        { sessionKey }
+      );
+      return false;
+    }
+
+    const notified = await context.onBlockCallback(sessionKey!, moduleName, methodName);
+    if (!notified) {
+      // Clean up the queued entry — no one can approve it.
+      approvalQueue.resolveByToken(token, 'deny');
+      logger.info(
+        `ASK policy → auto-denied (no channel context for OOB notification): ${moduleName}.${methodName}()`,
+        { sessionKey }
+      );
+      return false;
+    }
+
+    logger.info(`ASK policy → stalling hook until OOB approval: ${moduleName}.${methodName}()`, {
       sessionKey,
       token,
       requiresExplicitConfirmation: strict,
     });
-    return false;
+
+    // Hold the before_tool_call hook open — OpenClaw awaits this Promise.
+    // Resolves true when the human sends /approve <token>, false on deny/timeout.
+    return approvalQueue.waitForApproval(sessionKey!, moduleName, methodName);
   }
 
   private generateChannelToken(moduleName: string, methodName: string): string {

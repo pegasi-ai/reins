@@ -33,12 +33,36 @@ const TOOL_TO_MODULE: Record<string, { module: string; method: string }> = {
   // Shell
   bash: { module: 'Shell', method: 'bash' },
   exec: { module: 'Shell', method: 'exec' },
-  // Browser
+  // Browser — generic / short names
+  browser: { module: 'Browser', method: 'navigate' },
   navigate: { module: 'Browser', method: 'navigate' },
   screenshot: { module: 'Browser', method: 'screenshot' },
   click: { module: 'Browser', method: 'click' },
   type: { module: 'Browser', method: 'type' },
   evaluate: { module: 'Browser', method: 'evaluate' },
+  // Browser — MCP Playwright tool names
+  'mcp__plugin_playwright_playwright__browser_navigate': { module: 'Browser', method: 'navigate' },
+  'mcp__plugin_playwright_playwright__browser_navigate_back': { module: 'Browser', method: 'navigate' },
+  'mcp__plugin_playwright_playwright__browser_close': { module: 'Browser', method: 'navigate' },
+  'mcp__plugin_playwright_playwright__browser_tabs': { module: 'Browser', method: 'navigate' },
+  'mcp__plugin_playwright_playwright__browser_resize': { module: 'Browser', method: 'navigate' },
+  'mcp__plugin_playwright_playwright__browser_wait_for': { module: 'Browser', method: 'navigate' },
+  'mcp__plugin_playwright_playwright__browser_install': { module: 'Browser', method: 'navigate' },
+  'mcp__plugin_playwright_playwright__browser_click': { module: 'Browser', method: 'click' },
+  'mcp__plugin_playwright_playwright__browser_drag': { module: 'Browser', method: 'click' },
+  'mcp__plugin_playwright_playwright__browser_hover': { module: 'Browser', method: 'click' },
+  'mcp__plugin_playwright_playwright__browser_handle_dialog': { module: 'Browser', method: 'click' },
+  'mcp__plugin_playwright_playwright__browser_type': { module: 'Browser', method: 'type' },
+  'mcp__plugin_playwright_playwright__browser_fill_form': { module: 'Browser', method: 'type' },
+  'mcp__plugin_playwright_playwright__browser_press_key': { module: 'Browser', method: 'type' },
+  'mcp__plugin_playwright_playwright__browser_select_option': { module: 'Browser', method: 'type' },
+  'mcp__plugin_playwright_playwright__browser_file_upload': { module: 'Browser', method: 'type' },
+  'mcp__plugin_playwright_playwright__browser_take_screenshot': { module: 'Browser', method: 'screenshot' },
+  'mcp__plugin_playwright_playwright__browser_snapshot': { module: 'Browser', method: 'screenshot' },
+  'mcp__plugin_playwright_playwright__browser_console_messages': { module: 'Browser', method: 'screenshot' },
+  'mcp__plugin_playwright_playwright__browser_network_requests': { module: 'Browser', method: 'screenshot' },
+  'mcp__plugin_playwright_playwright__browser_evaluate': { module: 'Browser', method: 'evaluate' },
+  'mcp__plugin_playwright_playwright__browser_run_code': { module: 'Browser', method: 'evaluate' },
   // Network
   fetch: { module: 'Network', method: 'fetch' },
   request: { module: 'Network', method: 'request' },
@@ -48,6 +72,7 @@ const TOOL_TO_MODULE: Record<string, { module: string; method: string }> = {
   list_sessions: { module: 'Gateway', method: 'listSessions' },
   list_nodes: { module: 'Gateway', method: 'listNodes' },
   send_message: { module: 'Gateway', method: 'sendMessage' },
+  session_status: { module: 'Gateway', method: 'listSessions' },
   // Gmail-style names used in demos/integrations
   'gmail.deletemessages': { module: 'Gmail', method: 'deleteMessages' },
   'gmail.emptytrash': { module: 'Gmail', method: 'emptyTrash' },
@@ -88,6 +113,7 @@ export function createToolCallHook(
   return async (event, ctx): Promise<BeforeToolCallResult | void> => {
     const { toolName } = event;
 
+    try {
     const mapping = TOOL_TO_MODULE[toolName.toLowerCase()];
     const moduleName = mapping?.module ?? 'Unknown';
     const methodName = mapping?.method ?? toolName;
@@ -216,6 +242,16 @@ export function createToolCallHook(
         });
       }
       return { block: true, blockReason: reason };
+    }
+    } catch (unexpectedErr: unknown) {
+      // Outer fail-closed guard: any unhandled error in the hook (outside the inner
+      // try/catch) must block the tool, not allow it. OpenClaw's hook runner is
+      // fail-open — it catches hook exceptions and returns { blocked: false }.
+      logger.error(`[tool-interceptor] Unexpected error — blocking ${toolName} (fail-closed)`, {
+        error: unexpectedErr,
+        toolName,
+      });
+      return { block: true, blockReason: `ClawReins: unexpected hook error (fail-closed)` };
     }
   };
 }

@@ -20,7 +20,7 @@ import { PolicyStore } from '../storage/PolicyStore';
 import { logger } from '../core/Logger';
 import { createToolCallHook } from './tool-interceptor';
 import { channelContextStore } from './ChannelContextStore';
-import { initNotifier, sendApprovalNotification } from './oob-notifier';
+import { initNotifier, sendApprovalNotification, type FallbackChannel } from './oob-notifier';
 import { createApproveCommand, createDenyCommand } from './approval-commands';
 import path from 'path';
 import { readFileSync } from 'fs';
@@ -28,6 +28,7 @@ import { readFileSync } from 'fs';
 export interface ClawReinsConfig {
   enabled?: boolean;
   defaultAction?: 'ALLOW' | 'DENY' | 'ASK';
+  fallbackChannel?: FallbackChannel;
 }
 
 export interface ClawReinsPluginManifest {
@@ -189,13 +190,18 @@ export default {
       // -------------------------------------------------------------------
       // OOB notifier: initialise with runtime send functions + gateway config
       // -------------------------------------------------------------------
-      if (api.runtime) {
-        initNotifier(api.runtime, api.config);
-      }
+      // OpenClaw passes the full openclaw.json as api.config; the plugin's own
+      // config section is nested at plugins.entries.clawreins.config.
+      const globalConfig = api.config as {
+        plugins?: { entries?: { clawreins?: { config?: ClawReinsConfig } } };
+      } | undefined;
+      const pluginConfig = globalConfig?.plugins?.entries?.clawreins?.config;
+      logger.info('[plugin] pluginConfig at init', { pluginConfig: JSON.stringify(pluginConfig) });
+      initNotifier(api.runtime, api.config, pluginConfig?.fallbackChannel);
 
       // Wire the notifier callback so Interceptor can trigger notifications.
       interceptor.onBlockCallback = (sessionKey, moduleName, methodName) => {
-        void sendApprovalNotification(sessionKey, moduleName, methodName);
+        return sendApprovalNotification(sessionKey, moduleName, methodName);
       };
 
       // -------------------------------------------------------------------
@@ -220,11 +226,22 @@ export default {
           event: unknown,
           ctx: unknown
         ) => {
-          const e = event as { from?: string; content?: string };
-          const c = ctx as { channelId?: string; accountId?: string };
-          if (e.from && typeof e.content === 'string' && c.channelId) {
-            channelContextStore.onMessageReceived(e.from, e.content, c.channelId, c.accountId);
+          // OpenClaw may put channelId/accountId on event or ctx depending on version.
+          const e = event as { from?: string; content?: string; channelId?: string; accountId?: string; conversationId?: string };
+          const c = (ctx ?? {}) as { channelId?: string; accountId?: string; conversationId?: string };
+          const channelId = c.channelId ?? e.channelId;
+          const accountId = c.accountId ?? e.accountId;
+          const conversationId = c.conversationId ?? e.conversationId;
+          if (!e.from || typeof e.content !== 'string' || !channelId) {
+            logger.warn('[plugin] message_received: missing fields, skipping', {
+              hasFrom: !!e.from,
+              hasContent: typeof e.content === 'string',
+              hasChannelId: !!channelId,
+            });
+            return;
           }
+          channelContextStore.onMessageReceived(e.from, e.content, channelId, accountId, conversationId);
+          logger.info('[plugin] message_received: stored channel context', { from: e.from, channelId, conversationId });
         },
         'message_received'
       );
@@ -241,16 +258,22 @@ export default {
           event: unknown,
           ctx: unknown
         ) => {
-          const e = event as { message?: { role?: string; content?: unknown }; sessionKey?: string };
-          const c = ctx as { sessionKey?: string };
+          // sessionKey may be on ctx or directly on event depending on OpenClaw version.
+          const e = event as { message?: { role?: string; content?: unknown }; sessionKey?: string; role?: string; content?: unknown };
+          const c = (ctx ?? {}) as { sessionKey?: string };
           const sessionKey = c.sessionKey ?? e.sessionKey;
-          if (sessionKey && e.message?.role === 'user') {
-            const text = extractMessageText(e.message.content);
+          // Handle both {message: {role, content}} and flat {role, content} shapes.
+          const role = e.message?.role ?? e.role;
+          const content = e.message?.content ?? e.content;
+          if (sessionKey && role === 'user') {
+            const text = extractMessageText(content);
             if (text) {
-              channelContextStore.onBeforeMessageWrite(sessionKey, text);
+              const matched = channelContextStore.onBeforeMessageWrite(sessionKey, text);
+              if (matched) {
+                logger.info('[plugin] before_message_write: correlated', { sessionKey });
+              }
             }
           }
-          // Return nothing — don't block the message.
         },
         'before_message_write'
       );

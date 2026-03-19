@@ -116,7 +116,7 @@ export class Interceptor {
    * Optional callback fired (fire-and-forget) when a tool is blocked in channel mode.
    * The plugin sets this to send an OOB approval notification to the human.
    */
-  public onBlockCallback?: (sessionKey: string, moduleName: string, methodName: string) => void;
+  public onBlockCallback?: (sessionKey: string, moduleName: string, methodName: string) => Promise<boolean>;
 
   constructor(policy?: SecurityPolicy, logEnabled: boolean = true) {
     this.policy = policy || DEFAULT_POLICY;
@@ -351,20 +351,17 @@ export class Interceptor {
           rule,
           sessionKey,
           intervention,
+          onBlockCallback: this.onBlockCallback,
         };
 
         const approved = await this.arbitrator.judge(context);
         const decisionTime = Date.now() - startTime;
 
-        if (!approved) {
-          if (process.stdin.isTTY) {
-            // TTY: record denial for cooldown escalation.
-            trustRateLimiter.recordDenial(sessionKey || 'tty');
-          } else if (sessionKey && this.onBlockCallback) {
-            // Channel mode: fire OOB notification (non-blocking).
-            this.onBlockCallback(sessionKey, moduleName, methodName);
-          }
+        if (!approved && process.stdin.isTTY) {
+          // TTY: record denial for cooldown escalation.
+          trustRateLimiter.recordDenial(sessionKey || 'tty');
         }
+        // Channel mode: onBlockCallback is called inside judgeChannel() before stalling.
 
         await this.logDecision({
           timestamp: new Date().toISOString(),

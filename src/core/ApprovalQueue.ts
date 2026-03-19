@@ -12,17 +12,14 @@ export interface ApprovalRequestOptions {
   allowRetryAsApproval?: boolean;
 }
 
-export interface PendingApprovalInfo {
+interface ApprovalEntry {
+  sessionKey: string;
   moduleName: string;
   methodName: string;
   requiresExplicitConfirmation: boolean;
   actionSummary?: string;
   confirmationToken?: string;
   allowRetryAsApproval: boolean;
-}
-
-interface ApprovalEntry extends PendingApprovalInfo {
-  sessionKey: string;
   status: 'pending' | 'approved' | 'denied';
   createdAt: number;
   expiresAt: number;
@@ -32,8 +29,7 @@ interface ApprovalEntry extends PendingApprovalInfo {
 const DEFAULT_TTL_MS = 120_000;
 
 /**
- * Maximum age for a pending entry to be consumed via retry-as-approval.
- * Strict confirmation entries are never consumed via retry-as-approval.
+ * Maximum age for a pending entry before a new one is created on re-request.
  */
 const CONSUME_MAX_AGE_MS = 60_000;
 
@@ -42,7 +38,6 @@ const CLEANUP_INTERVAL_MS = 30_000;
 
 export class ApprovalQueue {
   private entries = new Map<string, ApprovalEntry>();
-  private blanketAllows = new Map<string, number>(); // key → expiresAt
   private lastCleanup = Date.now();
   private ttl: number;
 
@@ -57,11 +52,6 @@ export class ApprovalQueue {
   /** Composite key: one pending per session + module.method */
   private key(sessionKey: string, moduleName: string, methodName: string): string {
     return `${sessionKey}::${moduleName}.${methodName}`;
-  }
-
-  /** All keys belonging to a session (for approve/deny by session). */
-  private keysForSession(sessionKey: string): string[] {
-    return Array.from(this.entries.keys()).filter((k) => k.startsWith(`${sessionKey}::`));
   }
 
   // ---------------------------------------------------------------------------
@@ -108,7 +98,6 @@ export class ApprovalQueue {
       sessionKey,
       action: `${moduleName}.${methodName}`,
       requiresExplicitConfirmation: entry.requiresExplicitConfirmation,
-      allowRetryAsApproval: entry.allowRetryAsApproval,
     });
     return k;
   }
@@ -136,160 +125,13 @@ export class ApprovalQueue {
     return false;
   }
 
-  consumePending(sessionKey: string, moduleName: string, methodName: string): boolean {
-    const k = this.key(sessionKey, moduleName, methodName);
-    const entry = this.entries.get(k);
-
-    if (!entry || entry.status !== 'pending' || Date.now() >= entry.expiresAt) {
-      return false;
-    }
-
-    if (entry.requiresExplicitConfirmation) {
-      return false;
-    }
-    if (!entry.allowRetryAsApproval) {
-      return false;
-    }
-
-    const age = Date.now() - entry.createdAt;
-    if (age > CONSUME_MAX_AGE_MS) {
-      logger.info(`ApprovalQueue: pending too old for retry-as-approval, will re-prompt`, {
-        sessionKey,
-        action: `${moduleName}.${methodName}`,
-        ageMs: age,
-        maxAgeMs: CONSUME_MAX_AGE_MS,
-      });
-      return false;
-    }
-
-    this.entries.delete(k);
-    logger.info(`ApprovalQueue: pending consumed (retry-as-approval)`, {
-      sessionKey,
-      action: `${moduleName}.${methodName}`,
-      ageMs: age,
-    });
-    return true;
-  }
-
-  /** Approve pending non-strict entries in a session (YES flow). */
-  approve(sessionKey: string): number {
-    this.maybeCleanup();
-    let count = 0;
-
-    for (const k of this.keysForSession(sessionKey)) {
-      const entry = this.entries.get(k);
-      if (!entry) continue;
-      if (entry.status !== 'pending' || Date.now() >= entry.expiresAt) continue;
-      if (entry.requiresExplicitConfirmation) continue;
-
-      entry.status = 'approved';
-      entry.expiresAt = Date.now() + this.ttl;
-      count++;
-
-      logger.info(`ApprovalQueue: approved`, {
-        sessionKey,
-        action: `${entry.moduleName}.${entry.methodName}`,
-      });
-    }
-
-    return count;
-  }
-
-  /** Approve strict entries that match the provided confirmation token. */
-  confirm(sessionKey: string, confirmationToken: string): number {
-    this.maybeCleanup();
-    const normalized = confirmationToken.trim().toUpperCase();
-    let count = 0;
-
-    for (const k of this.keysForSession(sessionKey)) {
-      const entry = this.entries.get(k);
-      if (!entry) continue;
-      if (entry.status !== 'pending' || Date.now() >= entry.expiresAt) continue;
-      if (!entry.requiresExplicitConfirmation) continue;
-
-      const entryToken = (entry.confirmationToken || '').trim().toUpperCase();
-      if (!entryToken || entryToken !== normalized) {
-        continue;
-      }
-
-      entry.status = 'approved';
-      entry.expiresAt = Date.now() + this.ttl;
-      count++;
-
-      logger.info(`ApprovalQueue: explicitly confirmed`, {
-        sessionKey,
-        action: `${entry.moduleName}.${entry.methodName}`,
-      });
-    }
-
-    return count;
-  }
-
-  deny(sessionKey: string): number {
-    this.maybeCleanup();
-    let count = 0;
-    for (const k of this.keysForSession(sessionKey)) {
-      const entry = this.entries.get(k)!;
-      if (entry.status === 'pending') {
-        this.entries.delete(k);
-        count++;
-        logger.info(`ApprovalQueue: denied`, {
-          sessionKey,
-          action: `${entry.moduleName}.${entry.methodName}`,
-        });
-      }
-    }
-    return count;
-  }
-
-  hasPending(sessionKey: string): boolean {
-    const keys = this.keysForSession(sessionKey);
-    const result = keys.some((k) => {
-      const e = this.entries.get(k)!;
-      return e.status === 'pending' && Date.now() < e.expiresAt;
-    });
-    logger.debug(`ApprovalQueue.hasPending`, {
-      sessionKey,
-      result,
-      sessionEntries: keys.length,
-      totalSize: this.entries.size,
-    });
-    return result;
-  }
-
-  getPendingActions(
-    sessionKey: string,
-    includeStrict: boolean = false
-  ): Array<{ moduleName: string; methodName: string }> {
-    return this.keysForSession(sessionKey)
-      .map((k) => this.entries.get(k)!)
-      .filter((e) => e.status === 'pending' && Date.now() < e.expiresAt)
-      .filter((e) => includeStrict || !e.requiresExplicitConfirmation)
-      .map((e) => ({ moduleName: e.moduleName, methodName: e.methodName }));
-  }
-
-  getStrictPending(sessionKey: string): PendingApprovalInfo[] {
-    return this.keysForSession(sessionKey)
-      .map((k) => this.entries.get(k)!)
-      .filter((e) => e.status === 'pending' && Date.now() < e.expiresAt)
-      .filter((e) => e.requiresExplicitConfirmation)
-      .map((e) => ({
-        moduleName: e.moduleName,
-        methodName: e.methodName,
-        requiresExplicitConfirmation: true,
-        actionSummary: e.actionSummary,
-        confirmationToken: e.confirmationToken,
-        allowRetryAsApproval: e.allowRetryAsApproval,
-      }));
-  }
-
   // ---------------------------------------------------------------------------
   // Out-of-band token resolution
   // ---------------------------------------------------------------------------
 
   /**
-   * Resolve any pending entry (strict or non-strict) that has the given token.
-   * Used by the !approve / !deny commands so the human can approve from their channel.
+   * Resolve any pending entry that has the given token.
+   * Used by /approve and /deny commands.
    */
   resolveByToken(token: string, decision: 'approve' | 'deny'): boolean {
     this.maybeCleanup();
@@ -335,29 +177,56 @@ export class ApprovalQueue {
     return { token: entry.confirmationToken, summary: entry.actionSummary };
   }
 
-  // ---------------------------------------------------------------------------
-  // Blanket allows (time-limited auto-approve)
-  // ---------------------------------------------------------------------------
-
-  allowFor(sessionKey: string, moduleName: string, methodName: string, durationMs: number): void {
+  /**
+   * Stall the caller until the entry is approved, denied, or times out.
+   * Polls every 500 ms. Returns true if approved, false otherwise.
+   */
+  waitForApproval(
+    sessionKey: string,
+    moduleName: string,
+    methodName: string,
+    timeoutMs: number = DEFAULT_TTL_MS
+  ): Promise<boolean> {
     const k = this.key(sessionKey, moduleName, methodName);
-    this.blanketAllows.set(k, Date.now() + durationMs);
-    logger.info(`ApprovalQueue: blanket allow created`, {
-      sessionKey,
-      action: `${moduleName}.${methodName}`,
-      durationMs,
+    const deadline = Date.now() + timeoutMs;
+
+    return new Promise<boolean>((resolve) => {
+      const tick = (): void => {
+        const entry = this.entries.get(k);
+
+        if (!entry || Date.now() >= entry.expiresAt) {
+          logger.info('ApprovalQueue: stall ended — expired or removed', {
+            sessionKey,
+            action: `${moduleName}.${methodName}`,
+          });
+          resolve(false);
+          return;
+        }
+
+        if (entry.status === 'approved') {
+          this.entries.delete(k);
+          logger.info('ApprovalQueue: stall resolved (approved)', {
+            sessionKey,
+            action: `${moduleName}.${methodName}`,
+          });
+          resolve(true);
+          return;
+        }
+
+        if (Date.now() >= deadline) {
+          logger.info('ApprovalQueue: stall timed out', {
+            sessionKey,
+            action: `${moduleName}.${methodName}`,
+          });
+          resolve(false);
+          return;
+        }
+
+        setTimeout(tick, 500);
+      };
+
+      setTimeout(tick, 500);
     });
-  }
-
-  hasBlanketAllow(sessionKey: string, moduleName: string, methodName: string): boolean {
-    const k = this.key(sessionKey, moduleName, methodName);
-    const expiresAt = this.blanketAllows.get(k);
-    if (!expiresAt) return false;
-    if (Date.now() >= expiresAt) {
-      this.blanketAllows.delete(k);
-      return false;
-    }
-    return true;
   }
 
   // ---------------------------------------------------------------------------
@@ -375,11 +244,6 @@ export class ApprovalQueue {
     for (const [k, entry] of this.entries) {
       if (now >= entry.expiresAt) {
         this.entries.delete(k);
-      }
-    }
-    for (const [k, expiresAt] of this.blanketAllows) {
-      if (now >= expiresAt) {
-        this.blanketAllows.delete(k);
       }
     }
     this.lastCleanup = now;
