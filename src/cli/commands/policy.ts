@@ -101,6 +101,11 @@ async function changeDefaultLevel(policy: PersistedPolicy): Promise<void> {
   console.log(chalk.yellow('⚠️  Restart OpenClaw for changes to take effect: openclaw restart'));
 }
 
+function parseGlobs(input: string): string[] | undefined {
+  const parts = input.split(',').map((s) => s.trim()).filter(Boolean);
+  return parts.length > 0 ? parts : undefined;
+}
+
 async function modifyRule(policy: PersistedPolicy): Promise<void> {
   const modules = Object.keys(policy.modules);
 
@@ -158,13 +163,6 @@ async function modifyRule(policy: PersistedPolicy): Promise<void> {
       default: currentRule.denyPaths?.join(', ') || '',
     },
   ]);
-
-    {
-      type: 'input',
-      name: 'newAllowPaths',
-      message: 'Allowed path patterns (comma-separated globs, leave empty to allow all):\n  Note: paths containing commas must be edited directly in the JSON policy file.',
-      default: currentRule.allowPaths?.join(', ') || '',
-    },
 
   policy.modules[moduleName][methodName] = {
     action: newAction,

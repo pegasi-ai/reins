@@ -33,12 +33,20 @@ interface OobRuntime {
 // Module-level state set once at plugin registration
 // ---------------------------------------------------------------------------
 
+export interface FallbackChannel {
+  channelId: 'whatsapp' | 'telegram';
+  to: string;
+  accountId?: string;
+}
+
 let _runtime: OobRuntime | undefined;
 let _config: unknown;
+let _fallbackChannel: FallbackChannel | undefined;
 
-export function initNotifier(runtime: OobRuntime, config: unknown): void {
+export function initNotifier(runtime: OobRuntime | undefined, config: unknown, fallbackChannel?: FallbackChannel): void {
   _runtime = runtime;
   _config = config;
+  _fallbackChannel = fallbackChannel;
 }
 
 // ---------------------------------------------------------------------------
@@ -53,22 +61,35 @@ export async function sendApprovalNotification(
   sessionKey: string,
   moduleName: string,
   methodName: string
-): Promise<void> {
+): Promise<boolean> {
   const info = approvalQueue.getNotificationInfo(sessionKey, moduleName, methodName);
   if (!info) {
     logger.warn('[oob-notifier] No pending entry / token found', {
       sessionKey,
       action: `${moduleName}.${methodName}`,
     });
-    return;
+    return false;
   }
 
   const channelInfo = channelContextStore.get(sessionKey);
-  if (!channelInfo) {
-    logger.warn('[oob-notifier] No channel context for session — notification not sent', {
+  const target = channelInfo ?? (_fallbackChannel ? {
+    channelId: _fallbackChannel.channelId,
+    from: _fallbackChannel.to,
+    accountId: _fallbackChannel.accountId,
+  } : undefined);
+
+  if (!target) {
+    logger.warn('[oob-notifier] No channel context and no fallback configured — notification not sent', {
       sessionKey,
     });
-    return;
+    return false;
+  }
+
+  if (!channelInfo) {
+    logger.info('[oob-notifier] No channel context for session — using fallback channel', {
+      sessionKey,
+      fallbackChannelId: target.channelId,
+    });
   }
 
   const actionLine = info.summary || `${moduleName}.${methodName}()`;
@@ -79,7 +100,8 @@ export async function sendApprovalNotification(
     `/deny ${info.token}  to block`,
   ].join('\n');
 
-  await dispatch(channelInfo.channelId, channelInfo.from, channelInfo.accountId, message);
+  await dispatch(target.channelId, target.from, target.accountId, message);
+  return true;
 }
 
 /**

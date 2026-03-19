@@ -20,7 +20,7 @@ import { PolicyStore } from '../storage/PolicyStore';
 import { logger } from '../core/Logger';
 import { createToolCallHook } from './tool-interceptor';
 import { channelContextStore } from './ChannelContextStore';
-import { initNotifier, sendApprovalNotification } from './oob-notifier';
+import { initNotifier, sendApprovalNotification, type FallbackChannel } from './oob-notifier';
 import { createApproveCommand, createDenyCommand } from './approval-commands';
 import path from 'path';
 import { readFileSync } from 'fs';
@@ -28,6 +28,7 @@ import { readFileSync } from 'fs';
 export interface ClawReinsConfig {
   enabled?: boolean;
   defaultAction?: 'ALLOW' | 'DENY' | 'ASK';
+  fallbackChannel?: FallbackChannel;
 }
 
 export interface ClawReinsPluginManifest {
@@ -189,13 +190,18 @@ export default {
       // -------------------------------------------------------------------
       // OOB notifier: initialise with runtime send functions + gateway config
       // -------------------------------------------------------------------
-      if (api.runtime) {
-        initNotifier(api.runtime, api.config);
-      }
+      // OpenClaw passes the full openclaw.json as api.config; the plugin's own
+      // config section is nested at plugins.entries.clawreins.config.
+      const globalConfig = api.config as {
+        plugins?: { entries?: { clawreins?: { config?: ClawReinsConfig } } };
+      } | undefined;
+      const pluginConfig = globalConfig?.plugins?.entries?.clawreins?.config;
+      logger.info('[plugin] pluginConfig at init', { pluginConfig: JSON.stringify(pluginConfig) });
+      initNotifier(api.runtime, api.config, pluginConfig?.fallbackChannel);
 
       // Wire the notifier callback so Interceptor can trigger notifications.
       interceptor.onBlockCallback = (sessionKey, moduleName, methodName) => {
-        void sendApprovalNotification(sessionKey, moduleName, methodName);
+        return sendApprovalNotification(sessionKey, moduleName, methodName);
       };
 
       // -------------------------------------------------------------------

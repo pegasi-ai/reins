@@ -116,7 +116,7 @@ export class Interceptor {
    * Optional callback fired (fire-and-forget) when a tool is blocked in channel mode.
    * The plugin sets this to send an OOB approval notification to the human.
    */
-  public onBlockCallback?: (sessionKey: string, moduleName: string, methodName: string) => void;
+  public onBlockCallback?: (sessionKey: string, moduleName: string, methodName: string) => Promise<boolean>;
 
   constructor(policy?: SecurityPolicy, logEnabled: boolean = true) {
     this.policy = policy || DEFAULT_POLICY;
