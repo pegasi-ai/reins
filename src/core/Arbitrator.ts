@@ -108,13 +108,6 @@ export class Arbitrator {
     const { sessionKey, moduleName, methodName } = context;
     const strict = context.intervention?.requiresExplicitConfirmation === true;
 
-    if (!strict && approvalQueue.hasBlanketAllow(sessionKey!, moduleName, methodName)) {
-      logger.info(`ASK policy → auto-approved (blanket allow): ${moduleName}.${methodName}()`, {
-        sessionKey,
-      });
-      return true;
-    }
-
     if (approvalQueue.consume(sessionKey!, moduleName, methodName)) {
       logger.info(`ASK policy → approved via channel: ${moduleName}.${methodName}()`, {
         sessionKey,
