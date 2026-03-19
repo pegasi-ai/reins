@@ -227,11 +227,11 @@ export default {
           ctx: unknown
         ) => {
           // OpenClaw may put channelId/accountId on event or ctx depending on version.
-          const e = event as { from?: string; content?: string; channelId?: string; accountId?: string };
+          const e = event as { from?: string; content?: string; channelId?: string; accountId?: string; conversationId?: string };
           const c = (ctx ?? {}) as { channelId?: string; accountId?: string; conversationId?: string };
           const channelId = c.channelId ?? e.channelId;
           const accountId = c.accountId ?? e.accountId;
-          const conversationId = c.conversationId;
+          const conversationId = c.conversationId ?? e.conversationId;
           if (!e.from || typeof e.content !== 'string' || !channelId) {
             logger.warn('[plugin] message_received: missing fields, skipping', {
               hasFrom: !!e.from,

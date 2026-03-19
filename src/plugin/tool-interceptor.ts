@@ -114,8 +114,7 @@ export function createToolCallHook(
     const { toolName } = event;
 
     try {
-    const mapping = TOOL_TO_MODULE[toolName.toLowerCase()];
-    const moduleName = mapping?.module ?? 'Unknown';
+      const mapping = TOOL_TO_MODULE[toolName.toLowerCase()];
     const methodName = mapping?.method ?? toolName;
 
     let params = event.params;
