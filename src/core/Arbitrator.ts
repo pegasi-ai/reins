@@ -127,19 +127,26 @@ export class Arbitrator {
     });
 
     // Fire OOB notification immediately (sends WhatsApp/Telegram message to human).
-    // If no channel context exists (e.g. TUI session), notification returns false
-    // and we auto-deny rather than stalling forever.
-    if (context.onBlockCallback) {
-      const notified = await context.onBlockCallback(sessionKey!, moduleName, methodName);
-      if (!notified) {
-        // Clean up the queued entry — no one can approve it.
-        approvalQueue.resolveByToken(token, 'deny');
-        logger.info(
-          `ASK policy → auto-denied (no channel context for OOB notification): ${moduleName}.${methodName}()`,
-          { sessionKey }
-        );
-        return false;
-      }
+    // If onBlockCallback is absent, or it returns false (no channel context / send failure),
+    // auto-deny immediately rather than stalling for the full TTL.
+    if (!context.onBlockCallback) {
+      approvalQueue.resolveByToken(token, 'deny');
+      logger.info(
+        `ASK policy → auto-denied (no onBlockCallback configured): ${moduleName}.${methodName}()`,
+        { sessionKey }
+      );
+      return false;
+    }
+
+    const notified = await context.onBlockCallback(sessionKey!, moduleName, methodName);
+    if (!notified) {
+      // Clean up the queued entry — no one can approve it.
+      approvalQueue.resolveByToken(token, 'deny');
+      logger.info(
+        `ASK policy → auto-denied (no channel context for OOB notification): ${moduleName}.${methodName}()`,
+        { sessionKey }
+      );
+      return false;
     }
 
     logger.info(`ASK policy → stalling hook until OOB approval: ${moduleName}.${methodName}()`, {

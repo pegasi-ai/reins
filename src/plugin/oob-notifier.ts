@@ -100,8 +100,7 @@ export async function sendApprovalNotification(
     `/deny ${info.token}  to block`,
   ].join('\n');
 
-  await dispatch(target.channelId, target.from, target.accountId, message);
-  return true;
+  return dispatch(target.channelId, target.from, target.accountId, message);
 }
 
 /**
@@ -118,10 +117,10 @@ async function dispatch(
   to: string,
   accountId: string | undefined,
   message: string
-): Promise<void> {
+): Promise<boolean> {
   if (!_runtime?.channel) {
     logger.warn('[oob-notifier] Runtime not initialized or no channel API');
-    return;
+    return false;
   }
 
   try {
@@ -129,22 +128,26 @@ async function dispatch(
       const send = _runtime.channel.whatsapp?.sendMessageWhatsApp;
       if (!send) {
         logger.warn('[oob-notifier] sendMessageWhatsApp not available');
-        return;
+        return false;
       }
       await send(to, message, { verbose: false, cfg: _config, accountId });
       logger.info('[oob-notifier] WhatsApp notification sent', { to });
+      return true;
     } else if (channelId === 'telegram') {
       const send = _runtime.channel.telegram?.sendMessageTelegram;
       if (!send) {
         logger.warn('[oob-notifier] sendMessageTelegram not available');
-        return;
+        return false;
       }
       await send(to, message, { cfg: _config, accountId });
       logger.info('[oob-notifier] Telegram notification sent', { to });
+      return true;
     } else {
       logger.warn('[oob-notifier] No sender for channel — notification not sent', { channelId });
+      return false;
     }
   } catch (err) {
     logger.error('[oob-notifier] Failed to send notification', { channelId, to, error: err });
+    return false;
   }
 }
