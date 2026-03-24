@@ -22,6 +22,10 @@ import { createToolCallHook } from './tool-interceptor';
 import { channelContextStore } from './ChannelContextStore';
 import { initNotifier, sendApprovalNotification, type FallbackChannel } from './oob-notifier';
 import { createApproveCommand, createDenyCommand } from './approval-commands';
+import { intentCache } from '../core/IntentCache';
+import { normalizeTextAction } from '../core/ActionNormalizer';
+import { taskStateStore } from '../core/TaskStateStore';
+import { traceRecorder } from '../core/TraceRecorder';
 import path from 'path';
 import { readFileSync } from 'fs';
 
@@ -268,6 +272,26 @@ export default {
           if (sessionKey && role === 'user') {
             const text = extractMessageText(content);
             if (text) {
+              const taskState = taskStateStore.ingestUserMessage(sessionKey, text);
+              const normalizedUserAction = normalizeTextAction(text);
+              traceRecorder.append({
+                sessionKey,
+                kind: 'user_message',
+                timestamp: Date.now(),
+                rawSummary: text,
+                action: normalizedUserAction,
+              });
+              logger.info('[trajectory] user message ingested', {
+                sessionKey,
+                textPreview: text.length > 160 ? `${text.slice(0, 160)}...` : text,
+                normalizedUserAction,
+                taskState: {
+                  userGoal: taskState.userGoal.length > 160 ? `${taskState.userGoal.slice(0, 160)}...` : taskState.userGoal,
+                  allowedEffects: taskState.allowedEffects,
+                  forbiddenEffects: taskState.forbiddenEffects,
+                  protectedTargets: taskState.protectedTargets,
+                },
+              });
               const matched = channelContextStore.onBeforeMessageWrite(sessionKey, text);
               if (matched) {
                 logger.info('[plugin] before_message_write: correlated', { sessionKey });
@@ -276,6 +300,38 @@ export default {
           }
         },
         'before_message_write'
+      );
+
+      tryOn(
+        api,
+        'llm_output',
+        (event: unknown) => {
+          const e = event as {
+            runId?: string;
+            assistantTexts?: unknown[];
+            lastAssistant?: { content?: Array<{ type?: string; text?: string; thinking?: string }> };
+          };
+          if (!e.runId) return;
+
+          const texts = Array.isArray(e.assistantTexts)
+            ? e.assistantTexts.filter((item): item is string => typeof item === 'string')
+            : [];
+          const contentTexts = Array.isArray(e.lastAssistant?.content)
+            ? e.lastAssistant.content
+                .flatMap((item) => [item.text, item.thinking])
+                .filter((item): item is string => typeof item === 'string' && item.length > 0)
+            : [];
+          const merged = [...texts, ...contentTexts];
+          if (merged.length > 0) {
+            intentCache.record(e.runId, merged);
+            logger.info('[trajectory] llm_output recorded', {
+              runId: e.runId,
+              textCount: merged.length,
+              preview: merged[0]?.length > 160 ? `${merged[0].slice(0, 160)}...` : merged[0],
+            });
+          }
+        },
+        'llm_output'
       );
 
       // -------------------------------------------------------------------

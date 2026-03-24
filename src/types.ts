@@ -41,6 +41,13 @@ export interface SecurityPolicy {
       [methodName: string]: SecurityRule;
     };
   };
+  /**
+   * When true, disables the CATASTROPHIC-severity safety floor so that explicit
+   * ALLOW rules are never upgraded to ASK — even for the most dangerous actions.
+   * Can also be set via env var CLAWREINS_IGNORE_SAFETY_CHECKS=true.
+   * Default: false (safety floor is active).
+   */
+  ignoreSafetyChecks?: boolean;
 }
 
 export interface InterventionMetadata {
@@ -68,6 +75,8 @@ export interface InterventionMetadata {
   cooldownLevel?: number;
   /** Destructive-intercept severity for UI and audit context. */
   destructiveSeverity?: 'HIGH' | 'CATASTROPHIC';
+  /** True when assistant intent text was available for the destructive classification. */
+  destructiveIntentDriven?: boolean;
   /** Reasons from destructive classifier. */
   destructiveReasons?: string[];
   /** Optional bulk count identified by destructive classifier. */
@@ -76,6 +85,12 @@ export interface InterventionMetadata {
   destructiveTarget?: string;
   /** Require channel approvals to come via clawreins_respond (fail-secure if unavailable). */
   requiresRespondToolApproval?: boolean;
+  /** Multi-step trajectory alignment assessment for the pending action. */
+  trajectoryAlignment?: 'aligned' | 'drifting' | 'contradicted';
+  /** Confidence score for the trajectory judgment. */
+  trajectoryConfidence?: number;
+  /** If false, suppress OOB notification in channel mode and fail closed instead. */
+  notifyUserOnBlock?: boolean;
 }
 
 /**

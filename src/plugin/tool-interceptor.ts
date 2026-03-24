@@ -19,6 +19,13 @@ import {
   isDestructiveGatingEnabled,
 } from '../core/DestructiveClassifier';
 import { DecisionLog } from '../storage/DecisionLog';
+import { intentCache } from '../core/IntentCache';
+import { normalizeTextAction, normalizeToolCall } from '../core/ActionNormalizer';
+import { traceRecorder } from '../core/TraceRecorder';
+import { taskStateStore } from '../core/TaskStateStore';
+import { buildTrajectoryFeatures } from '../core/TrajectoryFeatureBuilder';
+import { trajectoryJudgeLLM, TrajectoryJudgment } from '../core/TrajectoryJudgeLLM';
+import { decideNotificationPolicy, NotificationDecision } from '../core/NotificationPolicy';
 import crypto from 'crypto';
 
 /**
@@ -90,9 +97,14 @@ const DESTRUCTIVE_GATING_ENABLED = isDestructiveGatingEnabled();
 const DESTRUCTIVE_BULK_THRESHOLD = getBulkThreshold();
 const memoryForecaster = new MemoryRiskForecaster();
 
+function summarizeText(text: string, maxLength: number = 160): string {
+  return text.length > maxLength ? `${text.slice(0, maxLength)}...` : text;
+}
+
 export interface BeforeToolCallEvent {
   toolName: string;
   params: Record<string, unknown>;
+  runId?: string;
 }
 
 export interface ToolContext {
@@ -146,12 +158,56 @@ export function createToolCallHook(
       }
     }
 
+    const sessionKeyForMemory = ctx.sessionKey || `local:${ctx.agentId || 'default'}`;
+    const intentText = event.runId ? intentCache.getText(event.runId) : '';
+    const normalizedToolAction = normalizeToolCall(toolName, params, { moduleName, methodName });
+    logger.info('[trajectory] tool call received', {
+      sessionKey: sessionKeyForMemory,
+      runId: event.runId,
+      toolName,
+      moduleName,
+      methodName,
+      hasIntentText: Boolean(intentText),
+      paramKeys: Object.keys(params || {}),
+    });
+    if (intentText) {
+      const normalizedIntentAction = normalizeTextAction(intentText);
+      traceRecorder.append({
+        sessionKey: sessionKeyForMemory,
+        runId: event.runId,
+        kind: 'assistant_intent',
+        timestamp: Date.now(),
+        rawSummary: intentText,
+        action: normalizedIntentAction,
+      });
+      logger.info('[trajectory] assistant intent recorded', {
+        sessionKey: sessionKeyForMemory,
+        runId: event.runId,
+        intentPreview: summarizeText(intentText),
+        normalizedIntentAction,
+      });
+    }
+    traceRecorder.append({
+      sessionKey: sessionKeyForMemory,
+      runId: event.runId,
+      kind: 'tool_call',
+      timestamp: Date.now(),
+      rawSummary: `${toolName} ${JSON.stringify(params)}`,
+      action: normalizedToolAction,
+    });
+    logger.info('[trajectory] tool normalized', {
+      sessionKey: sessionKeyForMemory,
+      runId: event.runId,
+      normalizedToolAction,
+    });
+
     const irreversibility = scoreIrreversibility(moduleName, methodName, params);
     const destructiveClassification: DestructiveClassification | undefined = DESTRUCTIVE_GATING_ENABLED
       ? classifyDestructiveAction(toolName, params, {
           moduleName,
           methodName,
           bulkThreshold: DESTRUCTIVE_BULK_THRESHOLD,
+          intentText,
         })
       : undefined;
 
@@ -168,9 +224,16 @@ export function createToolCallHook(
         target: destructiveClassification.target,
         argsHash: hashArgs(params),
       });
+      logger.info('[trajectory] destructive classification', {
+        sessionKey: sessionKeyForMemory,
+        runId: event.runId,
+        severity: destructiveClassification.severity,
+        reasons: destructiveClassification.reasons,
+        bulkCount: destructiveClassification.bulkCount,
+        target: destructiveClassification.target,
+        intentDriven: destructiveClassification.intentDriven,
+      });
     }
-
-    const sessionKeyForMemory = ctx.sessionKey || `local:${ctx.agentId || 'default'}`;
     const memoryRisk = memoryForecaster.assess(
       sessionKeyForMemory,
       moduleName,
@@ -178,6 +241,51 @@ export function createToolCallHook(
       params,
       irreversibility
     );
+    const taskState = taskStateStore.get(sessionKeyForMemory);
+    logger.info('[trajectory] task state snapshot', {
+      sessionKey: sessionKeyForMemory,
+      hasTaskState: Boolean(taskState),
+      taskState: taskState
+        ? {
+            userGoal: summarizeText(taskState.userGoal),
+            allowedEffects: taskState.allowedEffects,
+            forbiddenEffects: taskState.forbiddenEffects,
+            protectedTargets: taskState.protectedTargets,
+          }
+        : undefined,
+    });
+    const trajectoryFeatures = buildTrajectoryFeatures({
+      taskState,
+      recentEvents: traceRecorder.getRecent(sessionKeyForMemory, 12),
+      pendingAction: normalizedToolAction,
+    });
+    logger.info('[trajectory] features built', {
+      sessionKey: sessionKeyForMemory,
+      runId: event.runId,
+      trajectoryFeatures,
+    });
+    const trajectoryJudgment = await maybeJudgeTrajectory(
+      destructiveClassification,
+      taskState,
+      sessionKeyForMemory,
+      trajectoryFeatures,
+      normalizedToolAction
+    );
+    logger.info('[trajectory] judgment computed', {
+      sessionKey: sessionKeyForMemory,
+      runId: event.runId,
+      trajectoryJudgment,
+    });
+    const notificationDecision = decideNotificationPolicy({
+      severity: destructiveClassification?.severity,
+      judgment: trajectoryJudgment,
+    });
+    logger.info('[trajectory] notification policy decided', {
+      sessionKey: sessionKeyForMemory,
+      runId: event.runId,
+      severity: destructiveClassification?.severity,
+      notificationDecision,
+    });
     const intervention = buildInterventionMetadata(
       moduleName,
       methodName,
@@ -186,8 +294,25 @@ export function createToolCallHook(
       irreversibility,
       memoryRisk,
       destructiveClassification?.isDestructive ? destructiveClassification : undefined,
-      sessionKeyForMemory
+      sessionKeyForMemory,
+      trajectoryJudgment,
+      notificationDecision
     );
+    logger.info('[trajectory] intervention built', {
+      sessionKey: sessionKeyForMemory,
+      runId: event.runId,
+      intervention: intervention
+        ? {
+            forceAsk: intervention.forceAsk,
+            requiresExplicitConfirmation: intervention.requiresExplicitConfirmation,
+            notifyUserOnBlock: intervention.notifyUserOnBlock,
+            trajectoryAlignment: intervention.trajectoryAlignment,
+            trajectoryConfidence: intervention.trajectoryConfidence,
+            destructiveSeverity: intervention.destructiveSeverity,
+            actionSummary: intervention.actionSummary,
+          }
+        : undefined,
+    });
 
     if (destructiveClassification?.isDestructive && intervention?.actionSummary) {
       logInterceptEvent({
@@ -264,17 +389,25 @@ function buildInterventionMetadata(
   irreversibility: IrreversibilityAssessment,
   memoryRisk: MemoryRiskAssessment,
   destructive: DestructiveClassification | undefined,
-  sessionKey: string
+  sessionKey: string,
+  trajectoryJudgment: TrajectoryJudgment | undefined,
+  notificationDecision: NotificationDecision
 ): InterventionMetadata | undefined {
   const intervention: InterventionMetadata = {};
 
-  if (destructive?.isDestructive) {
+  if (destructive?.isDestructive && notificationDecision.requireApproval) {
     intervention.forceAsk = true;
     intervention.requiresRespondToolApproval = true;
     intervention.destructiveSeverity = destructive.severity;
+    intervention.destructiveIntentDriven = destructive.intentDriven;
     intervention.destructiveReasons = destructive.reasons;
     intervention.destructiveBulkCount = destructive.bulkCount;
     intervention.destructiveTarget = destructive.target;
+    intervention.notifyUserOnBlock = notificationDecision.notifyUser;
+    if (trajectoryJudgment) {
+      intervention.trajectoryAlignment = trajectoryJudgment.alignment;
+      intervention.trajectoryConfidence = trajectoryJudgment.confidence;
+    }
 
     if (destructive.severity === 'CATASTROPHIC') {
       intervention.requiresExplicitConfirmation = true;
@@ -381,6 +514,26 @@ function buildInterventionMetadata(
   }
 
   return intervention;
+}
+
+async function maybeJudgeTrajectory(
+  destructive: DestructiveClassification | undefined,
+  taskState: ReturnType<typeof taskStateStore.get>,
+  sessionKey: string,
+  trajectoryFeatures: ReturnType<typeof buildTrajectoryFeatures>,
+  normalizedToolAction: ReturnType<typeof normalizeToolCall>
+): Promise<TrajectoryJudgment | undefined> {
+  if (destructive?.severity !== 'CATASTROPHIC') {
+    return undefined;
+  }
+
+  return trajectoryJudgeLLM.judge({
+    taskState,
+    recentEvents: traceRecorder.getRecent(sessionKey, 10),
+    pendingAction: normalizedToolAction,
+    features: trajectoryFeatures,
+    severity: destructive.severity,
+  });
 }
 
 function generateConfirmationToken(moduleName: string, methodName: string): string {

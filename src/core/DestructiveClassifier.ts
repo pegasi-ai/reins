@@ -15,12 +15,14 @@ export interface DestructiveClassification {
   reasons: string[];
   bulkCount?: number;
   target?: string;
+  intentDriven?: boolean;
 }
 
 export interface DestructiveClassifierMeta {
   moduleName?: string;
   methodName?: string;
   bulkThreshold?: number;
+  intentText?: string;
 }
 
 const DEFAULT_BULK_THRESHOLD = 20;
@@ -238,7 +240,8 @@ export function classifyDestructiveAction(
   const moduleName = (meta.moduleName || '').toLowerCase();
   const methodName = (meta.methodName || '').toLowerCase();
   const normalizedTool = toolName.toLowerCase();
-  const text = `${normalizedTool} ${flattenText(args).toLowerCase()}`;
+  const intentText = (meta.intentText || '').toLowerCase();
+  const text = `${normalizedTool} ${flattenText(args).toLowerCase()} ${intentText}`.trim();
   const reasons: string[] = [];
 
   const bulkCount = detectBulkCount(args, bulkThreshold);
@@ -343,5 +346,6 @@ export function classifyDestructiveAction(
     reasons,
     bulkCount,
     target: extractTarget(toolName, args),
+    intentDriven: isDestructive && intentText.length > 0,
   };
 }

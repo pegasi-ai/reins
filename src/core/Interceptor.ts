@@ -244,6 +244,26 @@ export class Interceptor {
     }
 
     if (intervention.forceAsk && rule.action === 'ALLOW') {
+      // Severity tiering: only CATASTROPHIC can override an explicit ALLOW policy.
+      // HIGH severity (e.g. bulk heuristics, destructive verbs) must respect the
+      // user's decision — they already saw the risk and said ALLOW.
+      if (intervention.destructiveSeverity !== undefined) {
+        if (intervention.destructiveSeverity !== 'CATASTROPHIC') {
+          // HIGH: trust the user's ALLOW policy.
+          return rule;
+        }
+        // CATASTROPHIC: override ALLOW → ASK unless the user has opted out of the safety floor.
+        const safetyChecksIgnored =
+          this.policy.ignoreSafetyChecks === true ||
+          process.env.CLAWREINS_IGNORE_SAFETY_CHECKS?.toLowerCase() === 'true';
+        if (safetyChecksIgnored) {
+          return rule;
+        }
+        return { action: 'ASK', description };
+      }
+
+      // Non-destructive forceAsk sources (irreversibility score, memory risk,
+      // browser challenge, cooldown escalation) keep the existing behaviour.
       return {
         action: 'ASK',
         description,
