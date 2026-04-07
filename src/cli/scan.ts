@@ -17,6 +17,7 @@ interface ScanCommandOptions {
   html?: boolean;
   json?: boolean;
   monitor?: boolean;
+  resetBaseline?: boolean;
   yes?: boolean;
 }
 
@@ -25,10 +26,21 @@ interface ScanMonitorState {
   report: ScanReport;
 }
 
+type JsonValue = null | boolean | number | string | JsonValue[] | { [key: string]: JsonValue };
+
+interface ConfigDiffEntry {
+  path: string;
+  kind: 'added' | 'removed' | 'changed';
+  previousValue?: JsonValue;
+  currentValue?: JsonValue;
+}
+
 interface DriftComparison {
   baselineCreated: boolean;
   baselineReportUnhealthy: boolean;
+  configBaselineCreated: boolean;
   corruptedStateRecovered: boolean;
+  configChanges: ConfigDiffEntry[];
   verdictWorsened: boolean;
   worsenedChecks: Array<{
     id: string;
@@ -59,6 +71,9 @@ export async function scanCommand(options: ScanCommandOptions): Promise<void> {
     }
     if (options.alertCommand && !options.monitor) {
       throw new Error('--alert-command requires --monitor');
+    }
+    if (options.resetBaseline && !options.monitor) {
+      throw new Error('--reset-baseline requires --monitor');
     }
 
     const scanner = new SecurityScanner();
@@ -95,7 +110,7 @@ export async function scanCommand(options: ScanCommandOptions): Promise<void> {
     renderHtmlReportSummary(reportPath, options.html === true);
 
     if (options.monitor) {
-      monitorComparison = await updateMonitorState(report);
+      monitorComparison = await updateMonitorState(report, options.resetBaseline === true);
       renderMonitorSummary(monitorComparison, report);
       await maybeSendMonitorAlert(options.alertCommand, monitorComparison, report, reportPath);
     }
@@ -211,11 +226,13 @@ function renderNoFixesAvailable(report: ScanReport): void {
   }
 }
 
-async function updateMonitorState(report: ScanReport): Promise<DriftComparison> {
+async function updateMonitorState(report: ScanReport, resetBaseline: boolean): Promise<DriftComparison> {
   const statePath = getScanStatePath();
+  const snapshotPath = getConfigBaselinePath();
   await fs.ensureDir(path.dirname(statePath));
 
   let previousState: ScanMonitorState | null = null;
+  let previousSnapshot: JsonValue | null = null;
   let corruptedStateRecovered = false;
 
   try {
@@ -226,7 +243,19 @@ async function updateMonitorState(report: ScanReport): Promise<DriftComparison> 
     corruptedStateRecovered = true;
   }
 
+  try {
+    if (!resetBaseline && (await fs.pathExists(snapshotPath))) {
+      previousSnapshot = (await fs.readJson(snapshotPath)) as JsonValue;
+    }
+  } catch {
+    corruptedStateRecovered = true;
+  }
+
+  const currentSnapshot = await loadCurrentConfigSnapshot();
   const comparison = compareReports(previousState?.report, report, corruptedStateRecovered);
+  comparison.configBaselineCreated = previousSnapshot === null || resetBaseline;
+  comparison.configChanges = compareConfigs(previousSnapshot, currentSnapshot);
+
   await fs.writeJson(
     statePath,
     {
@@ -235,6 +264,9 @@ async function updateMonitorState(report: ScanReport): Promise<DriftComparison> 
     } satisfies ScanMonitorState,
     { spaces: 2 }
   );
+  if (previousSnapshot === null || resetBaseline) {
+    await fs.writeJson(snapshotPath, currentSnapshot, { spaces: 2 });
+  }
 
   return comparison;
 }
@@ -262,6 +294,7 @@ async function maybeSendMonitorAlert(
     CLAWREINS_SCAN_REPORT_PATH: reportPath,
     CLAWREINS_SCAN_REPORT_URL: toFileUrl(reportPath),
     CLAWREINS_SCAN_STATE_PATH: getScanStatePath(),
+    CLAWREINS_SCAN_CONFIG_BASELINE_PATH: getConfigBaselinePath(),
     CLAWREINS_SCAN_SUMMARY: buildAlertSummary(comparison, report),
     CLAWREINS_SCAN_WORSENED_CHECKS: comparison.worsenedChecks.map((change) => change.id).join(','),
   };
@@ -337,7 +370,9 @@ function compareReports(
     return {
       baselineCreated: true,
       baselineReportUnhealthy: current.verdict !== 'SECURE',
+      configBaselineCreated: false,
       corruptedStateRecovered,
+      configChanges: [],
       verdictWorsened: false,
       worsenedChecks: [],
     };
@@ -372,7 +407,9 @@ function compareReports(
   return {
     baselineCreated: false,
     baselineReportUnhealthy: false,
+    configBaselineCreated: false,
     corruptedStateRecovered,
+    configChanges: [],
     verdictWorsened: verdictRank(current.verdict) > verdictRank(previous.verdict),
     worsenedChecks,
     previousTimestamp: previous.timestamp,
@@ -381,6 +418,7 @@ function compareReports(
 
 function renderMonitorSummary(comparison: DriftComparison, report: ScanReport): void {
   const statePath = getScanStatePath();
+  const snapshotPath = getConfigBaselinePath();
 
   console.log(chalk.bold('Drift Monitor:'));
 
@@ -390,6 +428,9 @@ function renderMonitorSummary(comparison: DriftComparison, report: ScanReport): 
 
   if (comparison.baselineCreated) {
     console.log(`  ${chalk.dim(`Baseline saved: ${statePath}`)}`);
+    if (comparison.configBaselineCreated) {
+      console.log(`  ${chalk.dim(`Config baseline saved: ${snapshotPath}`)}`);
+    }
 
     if (comparison.baselineReportUnhealthy) {
       console.log(`  ${chalk.yellow(`Initial baseline is ${report.verdict}. Future monitor runs will alert on drift.`)}`);
@@ -404,8 +445,9 @@ function renderMonitorSummary(comparison: DriftComparison, report: ScanReport): 
   if (comparison.previousTimestamp) {
     console.log(`  ${chalk.dim(`Previous scan: ${comparison.previousTimestamp}`)}`);
   }
+  console.log(`  ${chalk.dim(`Config baseline: ${snapshotPath}`)}`);
 
-  if (comparison.verdictWorsened || comparison.worsenedChecks.length > 0) {
+  if (comparison.verdictWorsened || comparison.worsenedChecks.length > 0 || comparison.configChanges.length > 0) {
     console.log(`  ${chalk.red('Configuration drift detected.')}`);
 
     if (comparison.verdictWorsened) {
@@ -417,6 +459,9 @@ function renderMonitorSummary(comparison: DriftComparison, report: ScanReport): 
         `  ${chalk.red(`${change.id}: ${change.previousStatus} -> ${change.currentStatus}`)} ${chalk.dim(`(${change.message})`)}`
       );
     });
+    comparison.configChanges.forEach((change) => {
+      console.log(`  ${chalk.red(`CONFIG ${change.kind.toUpperCase()}: ${change.path}`)}`);
+    });
 
     return;
   }
@@ -425,13 +470,14 @@ function renderMonitorSummary(comparison: DriftComparison, report: ScanReport): 
 }
 
 function shouldTriggerDriftAlert(comparison: DriftComparison): boolean {
-  return comparison.verdictWorsened || comparison.worsenedChecks.length > 0;
+  return comparison.verdictWorsened || comparison.worsenedChecks.length > 0 || comparison.configChanges.length > 0;
 }
 
 function buildAlertSummary(comparison: DriftComparison, report: ScanReport): string {
   const changes = comparison.worsenedChecks.map(
     (change) => `${change.id}: ${change.previousStatus} -> ${change.currentStatus}`
   );
+  const configChanges = comparison.configChanges.map((change) => `${change.kind.toUpperCase()}: ${change.path}`);
 
   const parts = [
     `ClawReins drift detected.`,
@@ -441,6 +487,9 @@ function buildAlertSummary(comparison: DriftComparison, report: ScanReport): str
 
   if (changes.length > 0) {
     parts.push(`Changed checks: ${changes.join('; ')}.`);
+  }
+  if (configChanges.length > 0) {
+    parts.push(`Config changes: ${configChanges.join('; ')}.`);
   }
 
   return parts.join(' ');
@@ -518,6 +567,108 @@ async function writeHtmlReport(report: ScanReport): Promise<string> {
 function getScanStatePath(): string {
   const openclawHome = process.env.OPENCLAW_HOME || path.join(os.homedir(), '.openclaw');
   return path.join(openclawHome, 'clawreins', 'scan-state.json');
+}
+
+function getConfigBaselinePath(): string {
+  const openclawHome = process.env.OPENCLAW_HOME || path.join(os.homedir(), '.openclaw');
+  return path.join(openclawHome, 'clawreins', 'config-base.json');
+}
+
+async function loadCurrentConfigSnapshot(): Promise<JsonValue> {
+  const openclawHome = process.env.OPENCLAW_HOME || path.join(os.homedir(), '.openclaw');
+  const openclawConfigPath = process.env.OPENCLAW_CONFIG || path.join(openclawHome, 'openclaw.json');
+
+  if (!(await fs.pathExists(openclawConfigPath))) {
+    return {};
+  }
+
+  const parsed = (await fs.readJson(openclawConfigPath)) as JsonValue;
+  return normalizeJson(parsed);
+}
+
+function normalizeJson(value: JsonValue): JsonValue {
+  if (Array.isArray(value)) {
+    return value.map((entry) => normalizeJson(entry));
+  }
+
+  if (value !== null && typeof value === 'object') {
+    const record = value as Record<string, JsonValue>;
+    return Object.keys(record)
+      .sort()
+      .reduce<Record<string, JsonValue>>((accumulator, key) => {
+        accumulator[key] = normalizeJson(record[key]);
+        return accumulator;
+      }, {});
+  }
+
+  return value;
+}
+
+function compareConfigs(previous: JsonValue | null, current: JsonValue): ConfigDiffEntry[] {
+  if (previous === null) {
+    return [];
+  }
+
+  const changes: ConfigDiffEntry[] = [];
+  diffJson('', previous, current, changes);
+  return changes;
+}
+
+function diffJson(pathPrefix: string, previous: JsonValue, current: JsonValue, changes: ConfigDiffEntry[]): void {
+  if (Array.isArray(previous) || Array.isArray(current)) {
+    if (!Array.isArray(previous) || !Array.isArray(current) || JSON.stringify(previous) !== JSON.stringify(current)) {
+      changes.push({
+        path: pathPrefix || '$',
+        kind: 'changed',
+        previousValue: previous,
+        currentValue: current,
+      });
+    }
+    return;
+  }
+
+  const previousIsObject = previous !== null && typeof previous === 'object';
+  const currentIsObject = current !== null && typeof current === 'object';
+
+  if (!previousIsObject || !currentIsObject) {
+    if (previous !== current) {
+      changes.push({
+        path: pathPrefix || '$',
+        kind: 'changed',
+        previousValue: previous,
+        currentValue: current,
+      });
+    }
+    return;
+  }
+
+  const previousRecord = previous as Record<string, JsonValue>;
+  const currentRecord = current as Record<string, JsonValue>;
+  const keys = new Set([...Object.keys(previousRecord), ...Object.keys(currentRecord)]);
+
+  for (const key of Array.from(keys).sort()) {
+    const nextPath = pathPrefix ? `${pathPrefix}.${key}` : key;
+
+    if (!(key in previousRecord)) {
+      changes.push({
+        path: nextPath,
+        kind: 'added',
+        currentValue: currentRecord[key],
+      });
+      continue;
+    }
+
+    if (!(key in currentRecord)) {
+      changes.push({
+        path: nextPath,
+        kind: 'removed',
+        previousValue: previousRecord[key],
+      });
+      continue;
+    }
+
+    diffJson(nextPath, previousRecord[key], currentRecord[key], changes);
+  }
 }
 function openHtmlReport(reportPath: string): void {
   try {

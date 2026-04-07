@@ -417,13 +417,131 @@ test('clawreins scan --monitor creates a baseline state file on first run', () =
   });
 
   const statePath = path.join(openclawHome, 'clawreins', 'scan-state.json');
+  const baselinePath = path.join(openclawHome, 'clawreins', 'config-base.json');
   assert.notEqual(result.status, null);
   assert.match(result.stdout, /Drift Monitor:/);
   assert.match(result.stdout, /Baseline saved:/);
+  assert.match(result.stdout, /Config baseline saved:/);
   assert.ok(existsSync(statePath));
+  assert.ok(existsSync(baselinePath));
 
   const state = JSON.parse(readFileSync(statePath, 'utf8'));
+  const baseline = JSON.parse(readFileSync(baselinePath, 'utf8'));
   assert.equal(state.report.total, 13);
+  assert.equal(baseline.gateway.host, '127.0.0.1');
+});
+
+test('clawreins scan --monitor keeps comparing against the saved config baseline until reset', () => {
+  const homeDir = makeTempRoot('clawreins-scan-monitor-config-base-home-');
+  const openclawHome = path.join(homeDir, '.openclaw');
+  const openclawConfig = path.join(openclawHome, 'openclaw.json');
+  const baselinePath = path.join(openclawHome, 'clawreins', 'config-base.json');
+
+  writeJson(openclawConfig, {
+    gateway: { host: '127.0.0.1' },
+    auth: { token: '${GATEWAY_TOKEN}' },
+    browser: { headless: true },
+    tools: {
+      exec: {
+        safeBins: ['ls'],
+      },
+    },
+    sandbox: true,
+    rateLimit: { maxRequests: 10 },
+  });
+  chmodSync(openclawConfig, 0o600);
+
+  const firstResult = runCli(['scan', '--monitor'], {
+    HOME: homeDir,
+    OPENCLAW_HOME: openclawHome,
+  });
+  assert.notEqual(firstResult.status, null);
+
+  const initialBaseline = readFileSync(baselinePath, 'utf8');
+
+  writeJson(openclawConfig, {
+    gateway: { host: '127.0.0.1' },
+    auth: { token: '${GATEWAY_TOKEN}' },
+    browser: { headless: true },
+    tools: {
+      exec: {
+        safeBins: ['ls', 'cat'],
+      },
+    },
+    sandbox: true,
+    rateLimit: { maxRequests: 10 },
+  });
+  chmodSync(openclawConfig, 0o600);
+
+  const secondResult = runCli(['scan', '--monitor'], {
+    HOME: homeDir,
+    OPENCLAW_HOME: openclawHome,
+  });
+
+  assert.equal(secondResult.status, 1, `stderr: ${secondResult.stderr}`);
+  assert.match(secondResult.stdout, /Configuration drift detected\./);
+  assert.match(secondResult.stdout, /CONFIG CHANGED: tools\.exec\.safeBins/);
+  assert.equal(readFileSync(baselinePath, 'utf8'), initialBaseline);
+});
+
+test('clawreins scan --monitor --reset-baseline replaces the saved config baseline', () => {
+  const homeDir = makeTempRoot('clawreins-scan-monitor-reset-base-home-');
+  const openclawHome = path.join(homeDir, '.openclaw');
+  const openclawConfig = path.join(openclawHome, 'openclaw.json');
+  const baselinePath = path.join(openclawHome, 'clawreins', 'config-base.json');
+
+  writeJson(openclawConfig, {
+    gateway: { host: '127.0.0.1' },
+    auth: { token: '${GATEWAY_TOKEN}' },
+    browser: { headless: true },
+    tools: {
+      exec: {
+        safeBins: ['ls'],
+      },
+    },
+    sandbox: true,
+    rateLimit: { maxRequests: 10 },
+  });
+  chmodSync(openclawConfig, 0o600);
+
+  const firstResult = runCli(['scan', '--monitor'], {
+    HOME: homeDir,
+    OPENCLAW_HOME: openclawHome,
+  });
+  assert.notEqual(firstResult.status, null);
+
+  writeJson(openclawConfig, {
+    gateway: { host: '127.0.0.1' },
+    auth: { token: '${GATEWAY_TOKEN}' },
+    browser: { headless: true },
+    tools: {
+      exec: {
+        safeBins: ['ls', 'cat'],
+      },
+    },
+    sandbox: true,
+    rateLimit: { maxRequests: 10 },
+  });
+  chmodSync(openclawConfig, 0o600);
+
+  const resetResult = runCli(['scan', '--monitor', '--reset-baseline'], {
+    HOME: homeDir,
+    OPENCLAW_HOME: openclawHome,
+  });
+
+  assert.equal(resetResult.status, 1, `stderr: ${resetResult.stderr}`);
+  assert.match(resetResult.stdout, /No drift detected since the previous scan\./);
+
+  const baseline = JSON.parse(readFileSync(baselinePath, 'utf8'));
+  assert.deepEqual(baseline.tools.exec.safeBins, ['ls', 'cat']);
+
+  const followupResult = runCli(['scan', '--monitor'], {
+    HOME: homeDir,
+    OPENCLAW_HOME: openclawHome,
+  });
+
+  assert.equal(followupResult.status, 1, `stderr: ${followupResult.stderr}`);
+  assert.doesNotMatch(followupResult.stdout, /CONFIG CHANGED: tools\.exec\.safeBins/);
 });
 
 test('clawreins scan --monitor alerts when a check worsens relative to the saved baseline', () => {
