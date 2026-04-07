@@ -83,6 +83,7 @@ program
   .option('--html', 'Write and open an HTML scan report')
   .option('--json', 'Print the raw scan report as JSON')
   .option('--monitor', 'Compare against the last saved scan and alert on configuration drift')
+  .option('--reset-baseline', 'Replace the saved config baseline with the current config (use with --monitor)')
   .option('--alert-command <command>', 'Run a notification command when monitor mode detects drift')
   .option('--yes', 'Skip the confirmation prompt when using --fix')
   .action(scanCommand);

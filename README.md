@@ -91,6 +91,9 @@ clawreins scan --monitor
 
 # Compare against the baseline and invoke a notifier when drift is detected
 clawreins scan --monitor --alert-command "/path/to/send-openclaw-alert.sh"
+
+# Replace the saved config baseline with the current config
+clawreins scan --monitor --reset-baseline
 ```
 
 Supported auto-fixes:
@@ -108,8 +111,9 @@ Drift monitoring is opt-in. It is designed for scheduled runs, not enabled by de
 Default monitoring behavior:
 - disabled by default
 - run every 24 hours when scheduled
-- compare against `~/.openclaw/clawreins/scan-state.json`
-- alert only on worsened posture: verdict worsening, new `WARN`, or new `FAIL`
+- compare checks against `~/.openclaw/clawreins/scan-state.json`
+- compare config against `~/.openclaw/clawreins/config-base.json`
+- alert on worsened posture and config drift relative to the saved config baseline
 - no background auto-fix
 - HTML report still written to `~/Downloads/scan-report.html`
 
@@ -119,7 +123,7 @@ Manual run:
 clawreins scan --monitor
 ```
 
-The first run creates a baseline. Later runs compare the current report against that saved baseline and only alert when posture worsens.
+The first run creates a baseline. Later runs compare the current report and config against that saved baseline. Use `--reset-baseline` when you intentionally want the current config to become the new base.
 
 If you want scheduled jobs to notify through your own transport, add `--alert-command`. This command runs only when drift is detected. ClawReins exports these environment variables to the notifier:
 - `CLAWREINS_SCAN_SUMMARY`
@@ -127,6 +131,7 @@ If you want scheduled jobs to notify through your own transport, add `--alert-co
 - `CLAWREINS_SCAN_REPORT_PATH`
 - `CLAWREINS_SCAN_REPORT_URL`
 - `CLAWREINS_SCAN_STATE_PATH`
+- `CLAWREINS_SCAN_CONFIG_BASELINE_PATH`
 - `CLAWREINS_SCAN_WORSENED_CHECKS`
 
 That makes it easy to route alerts through:
@@ -147,14 +152,14 @@ The alert hook is generic on purpose. The scan CLI does not directly call the in
 
 Recommended operating model:
 - run once per day
-- use `--monitor` so each run compares against the last saved baseline
+- use `--monitor` so each run compares against the saved baseline
 - add `--alert-command` if you want drift notifications delivered outside the terminal
 - never use `--fix` in scheduled jobs
 
 What happens on scheduled runs:
-1. The first scheduled run creates the baseline in `~/.openclaw/clawreins/scan-state.json`.
-2. Later runs compare the current `ScanReport` against that saved baseline.
-3. ClawReins alerts only when posture worsens: verdict gets worse, a check changes from `PASS` to `WARN`, or a check changes from `PASS` or `WARN` to `FAIL`.
+1. The first scheduled run creates `scan-state.json` and `config-base.json` in `~/.openclaw/clawreins/`.
+2. Later runs compare the current `ScanReport` against the saved scan baseline and the current config against the saved config baseline.
+3. ClawReins alerts when posture worsens or when the current config differs from the saved config baseline.
 4. Every run still writes `~/Downloads/scan-report.html` so the latest full report is easy to inspect.
 
 Recommended scheduler settings:
@@ -440,6 +445,7 @@ clawreins update      # Alias for upgrade
 clawreins scan        # Run 13 security checks and save an HTML report
 clawreins scan --fix  # Backup config and apply supported remediations
 clawreins scan --monitor  # Compare with the last baseline and alert on drift
+clawreins scan --monitor --reset-baseline  # Accept the current config as the new monitor baseline
 clawreins scan --monitor --alert-command "/path/to/notifier.sh"  # Run a notifier on drift
 ```
 
@@ -481,7 +487,8 @@ All data stored in `~/.openclaw/clawreins/`:
 ├── policy.json       # Your security rules
 ├── decisions.jsonl   # Audit trail (append-only)
 ├── stats.json        # Statistics
-├── scan-state.json   # Last drift-monitoring baseline
+├── scan-state.json   # Last scan baseline
+├── config-base.json  # Saved config baseline for monitor mode
 ├── browser-sessions.json  # Encrypted persistent browser auth/session state
 └── clawreins.log          # Application logs
 ```
