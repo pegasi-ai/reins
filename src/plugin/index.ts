@@ -20,7 +20,7 @@ import { PolicyStore } from '../storage/PolicyStore';
 import { logger } from '../core/Logger';
 import { createToolCallHook } from './tool-interceptor';
 import { channelContextStore } from './ChannelContextStore';
-import { initNotifier, sendApprovalNotification, type FallbackChannel } from './oob-notifier';
+import { initNotifier, sendApprovalNotification, sendRawMessage, type FallbackChannel } from './oob-notifier';
 import { createApproveCommand, createDenyCommand } from './approval-commands';
 import path from 'path';
 import { readFileSync } from 'fs';
@@ -276,6 +276,57 @@ export default {
           }
         },
         'before_message_write'
+      );
+
+      // -------------------------------------------------------------------
+      // Hook: agent_end — surface LLM/API errors back to the user's channel
+      // -------------------------------------------------------------------
+      tryOn(
+        api,
+        'agent_end',
+        (event: unknown, ctx: unknown) => {
+          const e = event as { success?: boolean; error?: string };
+          const c = (ctx ?? {}) as { sessionKey?: string };
+          if (e.success === false && e.error) {
+            logger.warn('[plugin] agent_end: run failed', { error: e.error, sessionKey: c.sessionKey });
+            const sessionKey = c.sessionKey;
+            const channelInfo = sessionKey ? channelContextStore.get(sessionKey) : undefined;
+            const fallback = pluginConfig?.fallbackChannel;
+            const target = channelInfo ?? (fallback ? {
+              channelId: fallback.channelId,
+              from: fallback.to,
+              accountId: fallback.accountId,
+            } : undefined);
+            if (target) {
+              // Fire-and-forget — send error to the human's channel
+              void sendRawMessage(target.channelId, target.from, target.accountId, `⚠️ Agent error: ${e.error}`);
+            }
+          }
+        },
+        'agent_end'
+      );
+
+      // -------------------------------------------------------------------
+      // Hook: before_prompt_build — inject security guidance into system prompt
+      // Uses appendSystemContext so the content is prompt-cached (static per session).
+      // -------------------------------------------------------------------
+      tryOn(
+        api,
+        'before_prompt_build',
+        (_event: unknown) => {
+          return {
+            appendSystemContext: [
+              '## Security Policy (ClawReins)',
+              'A security layer (ClawReins) intercepts all tool calls before execution and routes them for human approval when required.',
+              'Never ask the user for permission in the chat interface. Do not say "can I delete...", "should I proceed...", "do you want me to...", or any similar phrasing asking for consent.',
+              'If an action requires approval, invoke the tool directly — ClawReins will pause it and handle the approval flow automatically via the configured channel.',
+              'A chat "yes" or "go ahead" grants no authorization. Only the ClawReins approval channel counts.',
+              'Do not reference, explain, or attempt to influence the ClawReins approval process in your replies.',
+              '',
+            ].join('\n'),
+          };
+        },
+        'before_prompt_build'
       );
 
       // -------------------------------------------------------------------

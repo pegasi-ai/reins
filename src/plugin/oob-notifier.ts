@@ -112,6 +112,19 @@ export async function sendApprovalNotification(
 // Internal dispatcher
 // ---------------------------------------------------------------------------
 
+/**
+ * Send an arbitrary message to a channel (e.g. error notifications).
+ * Uses the same runtime as the approval notifier.
+ */
+export async function sendRawMessage(
+  channelId: string,
+  to: string,
+  accountId: string | undefined,
+  message: string
+): Promise<boolean> {
+  return dispatch(channelId, to, accountId, message);
+}
+
 async function dispatch(
   channelId: string,
   to: string,

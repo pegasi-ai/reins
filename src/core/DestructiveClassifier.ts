@@ -53,7 +53,7 @@ export function getBulkThreshold(): number {
 }
 
 export function isDestructiveGatingEnabled(): boolean {
-  return (process.env.CLAWREINS_DESTRUCTIVE_GATING || 'on').toLowerCase() !== 'off';
+  return (process.env.CLAWREINS_DESTRUCTIVE_GATING || 'off').toLowerCase() !== 'off';
 }
 
 function stableStringify(value: unknown): string {

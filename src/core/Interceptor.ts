@@ -95,9 +95,10 @@ function applyPathPolicy(
   }
 
   // If allowPaths is set the target must match at least one entry.
+  // Use ASK (not hard DENY) so the human gets an OOB notification and can approve or deny.
   if (rule.allowPaths?.length && !rule.allowPaths.some((p) => matchesGlob(p, target))) {
     return {
-      action: 'DENY',
+      action: 'ASK',
       description: `Path "${target}" is not in the allowed paths list`,
     };
   }
