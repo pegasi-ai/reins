@@ -31,7 +31,16 @@ Think of it as `sudo` for AI agents. The first production integration is [OpenCl
 
 ## Quickstart
 ```
-npm i clawreins
+# Install globally
+npm install -g clawreins
+
+# Run interactive setup
+clawreins init
+
+# Restart OpenClaw
+openclaw restart
+
+# Scan environment
 clawreins scan
 ```
 
