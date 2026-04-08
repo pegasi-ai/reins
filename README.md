@@ -29,6 +29,12 @@ Think of it as `sudo` for AI agents. The first production integration is [OpenCl
 
 **OpenClaw cannot be its own watchdog. Neither can any CUA.**
 
+## Quickstart
+```
+npm i clawreins
+clawreins scan
+```
+
 ## Demo
 
 ![ClawReins demo](./public/clawreins-demo.gif)
