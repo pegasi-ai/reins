@@ -10,6 +10,15 @@ import os from 'os';
 import path from 'path';
 import { FixAction, FixResult, ScanCheck, ScanReport, SecurityScanner } from '../core/SecurityScanner';
 import { logger } from '../core/Logger';
+import {
+  ConfigDiffEntry,
+  DriftComparison,
+  JsonValue,
+  getConfigBaselinePath,
+  getScanStatePath,
+  WatchtowerScanArtifact,
+  writeWatchtowerArtifact,
+} from './watchtower-artifact';
 
 interface ScanCommandOptions {
   alertCommand?: string;
@@ -24,31 +33,6 @@ interface ScanCommandOptions {
 interface ScanMonitorState {
   savedAt: string;
   report: ScanReport;
-}
-
-type JsonValue = null | boolean | number | string | JsonValue[] | { [key: string]: JsonValue };
-
-interface ConfigDiffEntry {
-  path: string;
-  kind: 'added' | 'removed' | 'changed';
-  previousValue?: JsonValue;
-  currentValue?: JsonValue;
-}
-
-interface DriftComparison {
-  baselineCreated: boolean;
-  baselineReportUnhealthy: boolean;
-  configBaselineCreated: boolean;
-  corruptedStateRecovered: boolean;
-  configChanges: ConfigDiffEntry[];
-  verdictWorsened: boolean;
-  worsenedChecks: Array<{
-    id: string;
-    previousStatus: ScanCheck['status'] | 'NEW';
-    currentStatus: ScanCheck['status'];
-    message: string;
-  }>;
-  previousTimestamp?: string;
 }
 
 const DEFAULT_ALERT_TIMEOUT_MS = 30_000;
@@ -79,8 +63,15 @@ export async function scanCommand(options: ScanCommandOptions): Promise<void> {
     const scanner = new SecurityScanner();
     let report = await scanner.run();
     let monitorComparison: DriftComparison | null = null;
+    const command = renderScanCommand();
 
     if (options.json) {
+      const { artifact } = await writeWatchtowerArtifact({
+        command,
+        report,
+        monitorComparison,
+      });
+      await maybeUploadWatchtowerArtifact(artifact, true);
       console.log(JSON.stringify(report, null, 2));
       process.exitCode = exitCodeFor(report);
       return;
@@ -114,6 +105,15 @@ export async function scanCommand(options: ScanCommandOptions): Promise<void> {
       renderMonitorSummary(monitorComparison, report);
       await maybeSendMonitorAlert(options.alertCommand, monitorComparison, report, reportPath);
     }
+
+    const { artifact, artifactPath } = await writeWatchtowerArtifact({
+      command,
+      report,
+      monitorComparison,
+    });
+    renderWatchtowerArtifactSummary(artifactPath);
+    await maybeUploadWatchtowerArtifact(artifact, false);
+
     if (options.html) {
       openHtmlReport(reportPath);
     }
@@ -253,6 +253,7 @@ async function updateMonitorState(report: ScanReport, resetBaseline: boolean): P
 
   const currentSnapshot = await loadCurrentConfigSnapshot();
   const comparison = compareReports(previousState?.report, report, corruptedStateRecovered);
+  comparison.baselineReset = resetBaseline;
   comparison.configBaselineCreated = previousSnapshot === null || resetBaseline;
   comparison.configChanges = compareConfigs(previousSnapshot, currentSnapshot);
 
@@ -369,6 +370,7 @@ function compareReports(
   if (!previous) {
     return {
       baselineCreated: true,
+      baselineReset: false,
       baselineReportUnhealthy: current.verdict !== 'SECURE',
       configBaselineCreated: false,
       corruptedStateRecovered,
@@ -406,6 +408,7 @@ function compareReports(
 
   return {
     baselineCreated: false,
+    baselineReset: false,
     baselineReportUnhealthy: false,
     configBaselineCreated: false,
     corruptedStateRecovered,
@@ -500,6 +503,7 @@ function getAlertTimeoutMs(): number {
   const parsed = raw ? Number.parseInt(raw, 10) : NaN;
   return Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_ALERT_TIMEOUT_MS;
 }
+
 async function confirmFix(): Promise<boolean> {
   if (!process.stdin.isTTY) {
     throw new Error('Fix mode requires --yes when stdin is not interactive');
@@ -562,16 +566,6 @@ async function writeHtmlReport(report: ScanReport): Promise<string> {
   await fs.writeFile(outputPath, buildHtmlReport(report), 'utf8');
 
   return outputPath;
-}
-
-function getScanStatePath(): string {
-  const openclawHome = process.env.OPENCLAW_HOME || path.join(os.homedir(), '.openclaw');
-  return path.join(openclawHome, 'clawreins', 'scan-state.json');
-}
-
-function getConfigBaselinePath(): string {
-  const openclawHome = process.env.OPENCLAW_HOME || path.join(os.homedir(), '.openclaw');
-  return path.join(openclawHome, 'clawreins', 'config-base.json');
 }
 
 async function loadCurrentConfigSnapshot(): Promise<JsonValue> {
@@ -705,6 +699,56 @@ function renderHtmlReportSummary(reportPath: string, autoOpenRequested: boolean)
   }
 }
 
+function renderWatchtowerArtifactSummary(artifactPath: string): void {
+  console.log(chalk.bold('Watchtower Artifact:'));
+  console.log(`  ${chalk.dim(`Saved to: ${artifactPath}`)}`);
+}
+
+async function maybeUploadWatchtowerArtifact(artifact: WatchtowerScanArtifact, quiet: boolean): Promise<void> {
+  const baseUrl = process.env.CLAWREINS_WATCHTOWER_BASE_URL?.trim();
+  const apiKey = process.env.CLAWREINS_WATCHTOWER_API_KEY?.trim();
+
+  if (!baseUrl || !apiKey) {
+    if (!quiet) {
+      console.log(chalk.bold('Watchtower Upload:'));
+      console.log(
+        `  ${chalk.dim('Upload skipped because CLAWREINS_WATCHTOWER_BASE_URL or CLAWREINS_WATCHTOWER_API_KEY is not configured.')}`
+      );
+    }
+    return;
+  }
+
+  const ingestUrl = `${baseUrl.replace(/\/+$/, '')}/api/scan-artifacts/ingest`;
+
+  try {
+    const response = await fetch(ingestUrl, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'x-api-key': apiKey,
+      },
+      body: JSON.stringify(artifact),
+    });
+
+    if (!response.ok) {
+      const body = (await response.text()).trim();
+      const message = `Watchtower upload failed. ${response.status} ${response.statusText}${body ? `: ${body}` : ''}`;
+      console.error(chalk.red(message));
+      logger.warn(message, { ingestUrl });
+      return;
+    }
+
+    if (!quiet) {
+      console.log(chalk.bold('Watchtower Upload:'));
+      console.log(`  ${chalk.green(`Uploaded to ${ingestUrl}.`)}`);
+    }
+  } catch (error) {
+    const message = `Watchtower upload failed. ${error instanceof Error ? error.message : String(error)}`;
+    console.error(chalk.red(message));
+    logger.warn(message, { ingestUrl });
+  }
+}
+
 function buildHtmlReport(report: ScanReport): string {
   const checks = report.checks.map((check) => renderHtmlCheck(check)).join('\n');
   const scoreBar = Array.from({ length: report.total }, (_, index) =>
@@ -808,4 +852,9 @@ function exitCodeFor(report: ScanReport): 0 | 1 | 2 {
     return 1;
   }
   return 2;
+}
+
+function renderScanCommand(): string {
+  const argv = process.argv.slice(2);
+  return argv.length > 0 ? `clawreins ${argv.join(' ')}` : 'clawreins scan';
 }
