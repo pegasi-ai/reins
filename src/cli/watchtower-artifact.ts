@@ -141,11 +141,16 @@ function normalizeRemoteUrl(remoteUrl: string): string {
   }
 }
 
+function getRemoteDisplayName(normalizedRemote: string): string {
+  const parts = normalizedRemote.split('/').filter(Boolean);
+  return parts.length >= 2 ? parts.slice(-2).join('/') : normalizedRemote;
+}
+
 export function getRepositoryIdentity(cwd = process.cwd()): GitRepositoryIdentity {
   const repoRoot = runGitCommand(['rev-parse', '--show-toplevel'], cwd) || path.resolve(cwd);
   const remoteUrl = runGitCommand(['config', '--get', 'remote.origin.url'], repoRoot);
   const normalizedRemote = remoteUrl ? normalizeRemoteUrl(remoteUrl) : null;
-  const displayName = path.basename(repoRoot);
+  const displayName = normalizedRemote ? getRemoteDisplayName(normalizedRemote) : path.basename(repoRoot);
   const id = normalizedRemote
     ? normalizedRemote
     : `local/${createHash('sha256').update(repoRoot).digest('hex').slice(0, 16)}`;
