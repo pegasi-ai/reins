@@ -81,17 +81,17 @@ export interface WatchtowerScanArtifact {
   };
   source_details: {
     git: {
-      root_path: string;
+      root_path: null;
       remote_url: string | null;
     };
     openclaw: {
-      home_path: string;
-      config_path: string;
-      policy_path: string;
+      home_path: null;
+      config_path: null;
+      policy_path: null;
     };
     clawreins: {
-      state_path: string | null;
-      config_baseline_path: string | null;
+      state_path: null;
+      config_baseline_path: null;
     };
   };
 }
@@ -164,10 +164,6 @@ export function getOpenclawHomePath(): string {
 
 export function getOpenclawConfigPath(): string {
   return process.env.OPENCLAW_CONFIG || path.join(getOpenclawHomePath(), 'openclaw.json');
-}
-
-export function getPolicyPath(): string {
-  return path.join(getOpenclawHomePath(), 'clawreins', 'policy.json');
 }
 
 export function getScanStatePath(): string {
@@ -244,17 +240,17 @@ export function buildWatchtowerArtifact(
     },
     source_details: {
       git: {
-        root_path: repository.rootPath,
-        remote_url: repository.remoteUrl,
+        root_path: null,
+        remote_url: null,
       },
       openclaw: {
-        home_path: getOpenclawHomePath(),
-        config_path: getOpenclawConfigPath(),
-        policy_path: getPolicyPath(),
+        home_path: null,
+        config_path: null,
+        policy_path: null,
       },
       clawreins: {
-        state_path: monitorEnabled ? getScanStatePath() : null,
-        config_baseline_path: monitorEnabled ? getConfigBaselinePath() : null,
+        state_path: null,
+        config_baseline_path: null,
       },
     },
   };

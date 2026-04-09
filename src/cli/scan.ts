@@ -15,6 +15,7 @@ import {
   DriftComparison,
   JsonValue,
   getConfigBaselinePath,
+  getOpenclawConfigPath,
   getScanStatePath,
   WatchtowerScanArtifact,
   writeWatchtowerArtifact,
@@ -569,8 +570,7 @@ async function writeHtmlReport(report: ScanReport): Promise<string> {
 }
 
 async function loadCurrentConfigSnapshot(): Promise<JsonValue> {
-  const openclawHome = process.env.OPENCLAW_HOME || path.join(os.homedir(), '.openclaw');
-  const openclawConfigPath = process.env.OPENCLAW_CONFIG || path.join(openclawHome, 'openclaw.json');
+  const openclawConfigPath = getOpenclawConfigPath();
 
   if (!(await fs.pathExists(openclawConfigPath))) {
     return {};
@@ -718,7 +718,23 @@ async function maybeUploadWatchtowerArtifact(artifact: WatchtowerScanArtifact, q
     return;
   }
 
-  const ingestUrl = `${baseUrl.replace(/\/+$/, '')}/api/scan-artifacts/ingest`;
+  let ingestUrl: string;
+  try {
+    const parsedBaseUrl = new URL(baseUrl);
+    const host = parsedBaseUrl.hostname.toLowerCase();
+    const isLoopbackHttp = parsedBaseUrl.protocol === 'http:' && ['localhost', '127.0.0.1', '::1', '[::1]'].includes(host);
+
+    if (parsedBaseUrl.protocol !== 'https:' && !isLoopbackHttp) {
+      console.error(chalk.red('Watchtower upload skipped. CLAWREINS_WATCHTOWER_BASE_URL must use HTTPS unless it targets localhost, 127.0.0.1, or ::1.'));
+      return;
+    }
+
+    parsedBaseUrl.pathname = `${parsedBaseUrl.pathname.replace(/\/+$/, '')}/api/scan-artifacts/ingest`;
+    ingestUrl = parsedBaseUrl.toString();
+  } catch {
+    console.error(chalk.red('Watchtower upload skipped. CLAWREINS_WATCHTOWER_BASE_URL is not a valid URL.'));
+    return;
+  }
 
   try {
     const response = await fetch(ingestUrl, {
