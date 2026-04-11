@@ -274,11 +274,36 @@ npm run demo:destructive
 
 ## Quick Start
 
+### Docker (Recommended)
+
+```bash
+docker run -it --rm -v ~/.openclaw:/root/.openclaw -v $(pwd):/workspace -e ANTHROPIC_API_KEY=$ANTHROPIC_API_KEY pegasiai/clawreins
+```
+
+That's it. OpenClaw starts with ClawReins active. No local install needed.
+
+**Options:**
+| Env var | Values | Default |
+|---------|--------|---------|
+| `CLAWREINS_POLICY` | `permissive` \| `balanced` \| `strict` | `balanced` |
+
+```bash
+# Strict mode — all writes/shell blocked by default
+docker run -it --rm -v ~/.openclaw:/root/.openclaw -v $(pwd):/workspace \
+  -e ANTHROPIC_API_KEY=$ANTHROPIC_API_KEY \
+  -e CLAWREINS_POLICY=strict \
+  pegasiai/clawreins
+```
+
+### Local Install
+
 ### Prerequisites
 - Node.js >= 18.0.0
 - OpenClaw installed
 
 ### Installation
+
+**From npm:**
 
 ```bash
 # Install plugin
@@ -287,7 +312,7 @@ openclaw plugins install clawreins@beta
 # Run setup
 node ~/.openclaw/extensions/clawreins/dist/cli/index.js init
 
-# Reload gateway
+# Restart OpenClaw gateway
 openclaw gateway restart
 ```
 

@@ -1,0 +1,21 @@
+# System Requirements
+node>=18.0.0
+openclaw>=1.0.0
+
+# Dependencies
+inquirer>=9.2.12
+chalk>=4.1.2
+winston>=3.11.0
+commander>=11.1.0
+fs-extra>=11.2.0
+
+# Dev Dependencies
+@types/inquirer>=9.0.7
+@types/node>=20.10.5
+@types/fs-extra>=11.0.4
+@typescript-eslint/eslint-plugin>=6.15.0
+@typescript-eslint/parser>=6.15.0
+eslint>=8.56.0
+prettier>=3.1.1
+ts-node>=10.9.2
+typescript>=5.3.3
