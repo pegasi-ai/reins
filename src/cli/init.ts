@@ -227,7 +227,7 @@ export async function initWizard(options: InitWizardOptions = {}): Promise<InitS
     console.log('');
     console.log(chalk.bold.cyan('═'.repeat(80)));
     console.log(chalk.bold.cyan('   🦞 + 🪢 ClawReins Setup Wizard'));
-    console.log(chalk.bold.cyan('   ClawReins is the intervention layer for OpenClaw.'));
+    console.log(chalk.bold.cyan('   ClawReins is the runtime security layer for OpenClaw..'));
     console.log(chalk.bold.cyan('═'.repeat(80)));
     console.log('');
   }

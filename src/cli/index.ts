@@ -4,6 +4,8 @@
  * ClawReins CLI Entry Point
  */
 
+import fs from 'fs';
+import path from 'path';
 import { Command } from 'commander';
 import { runInitCommand } from './init';
 import { policyCommand } from './commands/policy';
@@ -15,9 +17,19 @@ import { toolShieldSyncCommand } from './commands/toolshield-sync';
 import { upgradeCommand } from './commands/upgrade';
 import { scanCommand } from './scan';
 
+function getCliVersion(): string {
+  try {
+    const packageJsonPath = path.resolve(__dirname, '..', '..', 'package.json');
+    const packageJson = JSON.parse(fs.readFileSync(packageJsonPath, 'utf8')) as { version?: unknown };
+    return typeof packageJson.version === 'string' ? packageJson.version : '1.0.0';
+  } catch {
+    return '1.0.0';
+  }
+}
+
 const program = new Command();
 
-program.name('clawreins').description('ClawReins is the intervention layer for OpenClaw.').version('1.0.0');
+program.name('clawreins').description('ClawReins is the runtime security layer for OpenClaw..').version(getCliVersion());
 
 // Initialize/configure ClawReins with OpenClaw
 program

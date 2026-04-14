@@ -111,6 +111,40 @@ clawreins scan --monitor --alert-command "/path/to/send-openclaw-alert.sh"
 clawreins scan --monitor --reset-baseline
 ```
 
+### Watchtower Uploads
+
+On interactive terminal runs, `clawreins scan` now offers to connect to Watchtower automatically when uploads are not configured yet.
+
+Default interactive flow:
+- answer `Y` to connect
+- enter your email
+- ClawReins provisions the Watchtower account, saves the API key to `~/.openclaw/clawreins/config.json`, and prints the dashboard URL
+- future scans upload automatically without copy-pasting keys from the dashboard
+
+For CI/CD or other headless environments, the env-var path still works:
+
+```bash
+export CLAWREINS_WATCHTOWER_BASE_URL="https://app.pegasi.ai"
+export CLAWREINS_WATCHTOWER_API_KEY="wt_your_api_key"
+clawreins scan
+```
+
+For local end-to-end testing without the real backend, run the mock server:
+
+```bash
+npm run mock:watchtower
+
+CLAWREINS_WATCHTOWER_BASE_URL="http://127.0.0.1:8787" clawreins scan
+```
+
+The mock server implements:
+- `POST /api/watchtower/connect`
+- `POST /api/scan-artifacts/ingest`
+- `GET /dashboard/:id`
+- `GET /_mock/requests`
+
+It writes received artifacts to a temp directory so you can inspect what the CLI uploaded.
+
 Supported auto-fixes:
 - Rebinding gateway host from `0.0.0.0` to `127.0.0.1`
 - Tightening config file permissions to `600`
