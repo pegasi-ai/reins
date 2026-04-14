@@ -24,7 +24,7 @@
     "openclaw",
     "human-in-the-loop",
     "runtime-interception",
-    "zero-trust"
+    "winston": "^3.11.0"
   ],
   "author": "Kevin Wu <kevin@usepegasi.com>",
   "license": "Apache-2.0",
