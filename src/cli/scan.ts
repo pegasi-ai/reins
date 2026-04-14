@@ -42,6 +42,12 @@ interface ScanMonitorState {
   report: ScanReport;
 }
 
+export interface SetupScanResult {
+  report: ScanReport;
+  reportPath: string;
+  watchtowerConfigured: boolean;
+}
+
 const DEFAULT_ALERT_TIMEOUT_MS = 30_000;
 const STATUS_STYLES = {
   PASS: { icon: '✅', color: chalk.green },
@@ -131,6 +137,31 @@ export async function scanCommand(options: ScanCommandOptions): Promise<void> {
     logger.error('Scan command failed', { error });
     process.exit(1);
   }
+}
+
+export async function runSetupScan(): Promise<SetupScanResult> {
+  const scanner = new SecurityScanner();
+  const report = await scanner.run();
+  const command = 'clawreins init';
+
+  renderTerminalReport(report);
+
+  const reportPath = await writeHtmlReport(report);
+  renderHtmlReportSummary(reportPath, false);
+
+  const { artifact, artifactPath } = await writeWatchtowerArtifact({
+    command,
+    report,
+    monitorComparison: null,
+  });
+  renderWatchtowerArtifactSummary(artifactPath);
+  const uploadResult = await maybeUploadWatchtowerArtifact(artifact, false);
+
+  return {
+    report,
+    reportPath,
+    watchtowerConfigured: uploadResult.watchtowerConfigured,
+  };
 }
 
 async function maybeApplyFixes(
@@ -710,7 +741,10 @@ function renderWatchtowerArtifactSummary(artifactPath: string): void {
   console.log(`  ${chalk.dim(`Saved to: ${artifactPath}`)}`);
 }
 
-async function maybeUploadWatchtowerArtifact(artifact: WatchtowerScanArtifact, quiet: boolean): Promise<void> {
+async function maybeUploadWatchtowerArtifact(
+  artifact: WatchtowerScanArtifact,
+  quiet: boolean
+): Promise<{ watchtowerConfigured: boolean }> {
   let credentials = await resolveWatchtowerCredentials();
 
   if (!credentials && !quiet) {
@@ -724,14 +758,18 @@ async function maybeUploadWatchtowerArtifact(artifact: WatchtowerScanArtifact, q
         `  ${chalk.dim('Upload skipped because Watchtower is not connected. Use CLAWREINS_WATCHTOWER_BASE_URL + CLAWREINS_WATCHTOWER_API_KEY for CI/CD and other headless environments.')}`
       );
     }
-    return;
+    return {
+      watchtowerConfigured: false,
+    };
   }
 
   try {
     buildWatchtowerApiUrl(credentials.baseUrl, '/api/scan-artifacts/ingest');
   } catch (error) {
     console.error(chalk.red(`Watchtower upload skipped. ${error instanceof Error ? error.message : String(error)}`));
-    return;
+    return {
+      watchtowerConfigured: true,
+    };
   }
 
   try {
@@ -746,6 +784,10 @@ async function maybeUploadWatchtowerArtifact(artifact: WatchtowerScanArtifact, q
     console.error(chalk.red(message));
     logger.warn(message, { baseUrl: credentials.baseUrl, source: credentials.source });
   }
+
+  return {
+    watchtowerConfigured: true,
+  };
 }
 
 export async function enrollWatchtowerWithEmail(

@@ -44,6 +44,15 @@ openclaw restart
 clawreins scan
 ```
 
+During interactive `clawreins init`, ClawReins now:
+- detects the local OpenClaw install
+- applies the selected setup
+- runs the first security scan automatically
+- offers Watchtower connect
+- if Watchtower is connected, offers a default daily 9am scheduled scan using a per-user scheduler
+  - macOS: `~/Library/LaunchAgents`
+  - Linux/Unix: user `crontab`
+
 ## Demo
 
 ![ClawReins demo](./public/clawreins-demo.gif)
