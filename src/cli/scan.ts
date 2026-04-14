@@ -20,6 +20,12 @@ import {
   WatchtowerScanArtifact,
   writeWatchtowerArtifact,
 } from './watchtower-artifact';
+import { buildWatchtowerApiUrl, connectWatchtowerAccount, uploadWatchtowerArtifact } from './watchtower';
+import {
+  DEFAULT_WATCHTOWER_BASE_URL,
+  resolveWatchtowerCredentials,
+  saveWatchtowerSettings,
+} from '../storage/WatchtowerConfig';
 
 interface ScanCommandOptions {
   alertCommand?: string;
@@ -34,6 +40,12 @@ interface ScanCommandOptions {
 interface ScanMonitorState {
   savedAt: string;
   report: ScanReport;
+}
+
+export interface SetupScanResult {
+  report: ScanReport;
+  reportPath: string;
+  watchtowerConfigured: boolean;
 }
 
 const DEFAULT_ALERT_TIMEOUT_MS = 30_000;
@@ -125,6 +137,31 @@ export async function scanCommand(options: ScanCommandOptions): Promise<void> {
     logger.error('Scan command failed', { error });
     process.exit(1);
   }
+}
+
+export async function runSetupScan(): Promise<SetupScanResult> {
+  const scanner = new SecurityScanner();
+  const report = await scanner.run();
+  const command = 'clawreins init';
+
+  renderTerminalReport(report);
+
+  const reportPath = await writeHtmlReport(report);
+  renderHtmlReportSummary(reportPath, false);
+
+  const { artifact, artifactPath } = await writeWatchtowerArtifact({
+    command,
+    report,
+    monitorComparison: null,
+  });
+  renderWatchtowerArtifactSummary(artifactPath);
+  const uploadResult = await maybeUploadWatchtowerArtifact(artifact, false);
+
+  return {
+    report,
+    reportPath,
+    watchtowerConfigured: uploadResult.watchtowerConfigured,
+  };
 }
 
 async function maybeApplyFixes(
@@ -704,64 +741,137 @@ function renderWatchtowerArtifactSummary(artifactPath: string): void {
   console.log(`  ${chalk.dim(`Saved to: ${artifactPath}`)}`);
 }
 
-async function maybeUploadWatchtowerArtifact(artifact: WatchtowerScanArtifact, quiet: boolean): Promise<void> {
-  const baseUrl = process.env.CLAWREINS_WATCHTOWER_BASE_URL?.trim();
-  const apiKey = process.env.CLAWREINS_WATCHTOWER_API_KEY?.trim();
+async function maybeUploadWatchtowerArtifact(
+  artifact: WatchtowerScanArtifact,
+  quiet: boolean
+): Promise<{ watchtowerConfigured: boolean }> {
+  let credentials = await resolveWatchtowerCredentials();
 
-  if (!baseUrl || !apiKey) {
+  if (!credentials && !quiet) {
+    credentials = await maybeConnectWatchtowerInteractively(artifact);
+  }
+
+  if (!credentials) {
     if (!quiet) {
       console.log(chalk.bold('Watchtower Upload:'));
       console.log(
-        `  ${chalk.dim('Upload skipped because CLAWREINS_WATCHTOWER_BASE_URL or CLAWREINS_WATCHTOWER_API_KEY is not configured.')}`
+        `  ${chalk.dim('Upload skipped because Watchtower is not connected. Use CLAWREINS_WATCHTOWER_BASE_URL + CLAWREINS_WATCHTOWER_API_KEY for CI/CD and other headless environments.')}`
       );
     }
-    return;
-  }
-
-  let ingestUrl: string;
-  try {
-    const parsedBaseUrl = new URL(baseUrl);
-    const host = parsedBaseUrl.hostname.toLowerCase();
-    const isLoopbackHttp = parsedBaseUrl.protocol === 'http:' && ['localhost', '127.0.0.1', '::1', '[::1]'].includes(host);
-
-    if (parsedBaseUrl.protocol !== 'https:' && !isLoopbackHttp) {
-      console.error(chalk.red('Watchtower upload skipped. CLAWREINS_WATCHTOWER_BASE_URL must use HTTPS unless it targets localhost, 127.0.0.1, or ::1.'));
-      return;
-    }
-
-    parsedBaseUrl.pathname = `${parsedBaseUrl.pathname.replace(/\/+$/, '')}/api/scan-artifacts/ingest`;
-    ingestUrl = parsedBaseUrl.toString();
-  } catch {
-    console.error(chalk.red('Watchtower upload skipped. CLAWREINS_WATCHTOWER_BASE_URL is not a valid URL.'));
-    return;
+    return {
+      watchtowerConfigured: false,
+    };
   }
 
   try {
-    const response = await fetch(ingestUrl, {
-      method: 'POST',
-      headers: {
-        'content-type': 'application/json',
-        'x-api-key': apiKey,
-      },
-      body: JSON.stringify(artifact),
-    });
+    buildWatchtowerApiUrl(credentials.baseUrl, '/api/scan-artifacts/ingest');
+  } catch (error) {
+    console.error(chalk.red(`Watchtower upload skipped. ${error instanceof Error ? error.message : String(error)}`));
+    return {
+      watchtowerConfigured: true,
+    };
+  }
 
-    if (!response.ok) {
-      const body = (await response.text()).trim();
-      const message = `Watchtower upload failed. ${response.status} ${response.statusText}${body ? `: ${body}` : ''}`;
-      console.error(chalk.red(message));
-      logger.warn(message, { ingestUrl });
-      return;
-    }
+  try {
+    const { ingestUrl } = await uploadWatchtowerArtifact(credentials.baseUrl, credentials.apiKey, artifact);
 
     if (!quiet) {
       console.log(chalk.bold('Watchtower Upload:'));
       console.log(`  ${chalk.green(`Uploaded to ${ingestUrl}.`)}`);
     }
   } catch (error) {
-    const message = `Watchtower upload failed. ${error instanceof Error ? error.message : String(error)}`;
+    const message = error instanceof Error ? error.message : `Watchtower upload failed. ${String(error)}`;
     console.error(chalk.red(message));
-    logger.warn(message, { ingestUrl });
+    logger.warn(message, { baseUrl: credentials.baseUrl, source: credentials.source });
+  }
+
+  return {
+    watchtowerConfigured: true,
+  };
+}
+
+export async function enrollWatchtowerWithEmail(
+  email: string,
+  artifact: WatchtowerScanArtifact,
+  baseUrl = process.env.CLAWREINS_WATCHTOWER_BASE_URL?.trim() || DEFAULT_WATCHTOWER_BASE_URL
+): Promise<{ configPath: string | null; dashboardUrl: string; message?: string; status: 'created' | 'existing' }> {
+  const enrollment = await connectWatchtowerAccount(baseUrl, email, artifact);
+  let configPath: string | null = null;
+
+  if (enrollment.apiKey) {
+    configPath = await saveWatchtowerSettings({
+      apiKey: enrollment.apiKey,
+      baseUrl: enrollment.baseUrl,
+      dashboardUrl: enrollment.dashboardUrl,
+      email: enrollment.email,
+    });
+  }
+
+  return {
+    configPath,
+    dashboardUrl: enrollment.dashboardUrl,
+    message: enrollment.message,
+    status: enrollment.status,
+  };
+}
+
+async function maybeConnectWatchtowerInteractively(
+  artifact: WatchtowerScanArtifact
+): Promise<Awaited<ReturnType<typeof resolveWatchtowerCredentials>>> {
+  if (!process.stdin.isTTY || !process.stdout.isTTY) {
+    return null;
+  }
+
+  console.log(chalk.bold('Watchtower Setup:'));
+
+  const { shouldConnect } = await inquirer.prompt([
+    {
+      type: 'confirm',
+      name: 'shouldConnect',
+      message: 'Connect to Watchtower for continuous monitoring? (free)',
+      default: true,
+    },
+  ]);
+
+  if (!shouldConnect) {
+    console.log(`  ${chalk.dim('Skipped. You can connect later by setting Watchtower env vars or running scan interactively again.')}`);
+    return null;
+  }
+
+  const { email } = await inquirer.prompt([
+    {
+      type: 'input',
+      name: 'email',
+      message: 'Email',
+      validate: (value: string) =>
+        /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.trim()) ? true : 'Enter a valid email address.',
+    },
+  ]);
+
+  try {
+    const outcome = await enrollWatchtowerWithEmail(email.trim(), artifact);
+    console.log(`  ${chalk.dim(`Dashboard: ${outcome.dashboardUrl}`)}`);
+    console.log(`  ${chalk.dim('Check your email for your magic link.')}`);
+
+    if (outcome.status === 'created' && outcome.configPath) {
+      console.log(`  ${chalk.green('✅ Connected!')} ${chalk.dim(`API key saved to ${outcome.configPath}`)}`);
+      console.log(`  ${chalk.green('Next scan will upload automatically.')}`);
+      return await resolveWatchtowerCredentials();
+    }
+
+    if (outcome.message) {
+      console.log(`  ${chalk.yellow(outcome.message)}`);
+    } else {
+      console.log(`  ${chalk.yellow('Account already exists, and no new API key was issued.')}`);
+    }
+    console.log(`  ${chalk.yellow('Automatic upload will work once the original API key is available in ~/.openclaw/clawreins/config.json or via env vars.')}`);
+
+    return await resolveWatchtowerCredentials();
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.log(`  ${chalk.red(message)}`);
+    logger.warn('Watchtower interactive enrollment failed', { error });
+    return null;
   }
 }
 

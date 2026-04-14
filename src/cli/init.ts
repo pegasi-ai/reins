@@ -19,6 +19,9 @@ import { DEFAULT_POLICY } from '../config';
 import { SecurityRule } from '../types';
 import { getProtectedModules } from '../plugin/tool-interceptor';
 import { syncToolShieldDefaults } from '../toolshield/sync';
+import { runSetupScan } from './scan';
+import { installWatchtowerSchedule, supportsScheduledScans } from './scheduler';
+import { resolveWatchtowerCredentials } from '../storage/WatchtowerConfig';
 
 type SecurityLevel = 'permissive' | 'balanced' | 'strict' | 'custom';
 
@@ -217,6 +220,46 @@ function getNextSteps(toolShieldSkipped: boolean): string[] {
   return nextSteps;
 }
 
+async function maybeOfferWatchtowerSchedule(): Promise<string | null> {
+  const credentials = await resolveWatchtowerCredentials();
+  if (!credentials || credentials.source !== 'config') {
+    return null;
+  }
+
+  if (!supportsScheduledScans()) {
+    console.log(chalk.yellow('⚠️  Automatic scheduled scans are not supported on this platform.'));
+    return null;
+  }
+
+  console.log('');
+  console.log(chalk.green('✅ Connected to Watchtower!'));
+  console.log('');
+
+  const { enableSchedule } = await inquirer.prompt([
+    {
+      type: 'confirm',
+      name: 'enableSchedule',
+      message: '📡 Enable daily automatic scans?',
+      default: true,
+    },
+  ]);
+
+  if (!enableSchedule) {
+    return null;
+  }
+
+  const result = await installWatchtowerSchedule();
+  if (result.alreadyInstalled) {
+    console.log('');
+    console.log(chalk.green('✅ Daily scan is already scheduled at 9am. Results upload to Watchtower automatically.'));
+    return result.descriptor;
+  }
+
+  console.log('');
+  console.log(chalk.green('✅ Daily scan scheduled at 9am. Results upload to Watchtower automatically.'));
+  return result.descriptor;
+}
+
 export async function initWizard(options: InitWizardOptions = {}): Promise<InitSuccessOutput> {
   const nonInteractive = options.nonInteractive === true;
   const jsonMode = options.json === true;
@@ -227,7 +270,7 @@ export async function initWizard(options: InitWizardOptions = {}): Promise<InitS
     console.log('');
     console.log(chalk.bold.cyan('═'.repeat(80)));
     console.log(chalk.bold.cyan('   🦞 + 🪢 ClawReins Setup Wizard'));
-    console.log(chalk.bold.cyan('   ClawReins is the intervention layer for OpenClaw.'));
+    console.log(chalk.bold.cyan('   ClawReins is the runtime security layer for OpenClaw..'));
     console.log(chalk.bold.cyan('═'.repeat(80)));
     console.log('');
   }
@@ -438,6 +481,29 @@ export async function initWizard(options: InitWizardOptions = {}): Promise<InitS
     if (!jsonMode) {
       console.log(chalk.yellow('⚠️  ToolShield sync skipped in non-interactive mode.'));
       console.log(chalk.dim('  You can run: clawreins toolshield-sync'));
+    }
+  }
+
+  if (!nonInteractive && !jsonMode) {
+    console.log('');
+    console.log(chalk.bold('Step 7: Running first security scan...'));
+    console.log('');
+
+    try {
+      await runSetupScan();
+
+      try {
+        await maybeOfferWatchtowerSchedule();
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        warnings.push(`Scheduled scan setup failed: ${message}`);
+        console.log(chalk.yellow(`⚠️  Scheduled scan setup failed: ${message}`));
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      warnings.push(`Initial security scan failed: ${message}`);
+      console.log(chalk.yellow(`⚠️  Initial security scan failed: ${message}`));
+      console.log(chalk.dim('  You can retry manually with: clawreins scan'));
     }
   }
 

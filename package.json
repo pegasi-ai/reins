@@ -1,7 +1,7 @@
 {
   "name": "clawreins",
-  "version": "0.0.3-beta.8",
-  "description": "ClawReins is the intervention layer for OpenClaw.",
+  "version": "0.0.21",
+  "description": "ClawReins is the runtime security layer for OpenClaw.",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "bin": {
@@ -13,6 +13,7 @@
     "lint": "eslint src --ext .ts",
     "format": "prettier --write \"src/**/*.ts\"",
     "demo:destructive": "ts-node scripts/demo-destructive.ts",
+    "mock:watchtower": "node scripts/mock-watchtower.js",
     "toolshield:sync": "bash ./scripts/sync-toolshield-openclaw.sh",
     "prepublishOnly": "npm run build"
   },
@@ -23,20 +24,21 @@
     "openclaw",
     "human-in-the-loop",
     "runtime-interception",
-    "zero-trust"
+    "winston": "^3.11.0"
   ],
-  "author": "Sandro Munda <sandro@munda.me>",
-  "license": "MIT",
+  "author": "Kevin Wu <kevin@usepegasi.com>",
+  "license": "Apache-2.0",
   "repository": {
     "type": "git",
-    "url": "https://github.com/SeyZ/clawreins.git"
+    "url": "https://github.com/pegasi-ai/clawreins.git"
   },
   "dependencies": {
     "chalk": "^4.1.2",
-    "clawreins": "^0.0.3-beta.3",
+    "clawreins": "^0.0.21",
     "commander": "^11.1.0",
     "fs-extra": "^11.2.0",
     "inquirer": "^9.2.12",
+    "scarf": "^0.0.10",
     "winston": "^3.11.0"
   },
   "devDependencies": {
