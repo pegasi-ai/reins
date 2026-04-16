@@ -1,6 +1,6 @@
 ---
-name: clawreins
-description: Use this skill whenever security, policies, governance, guardrails, compliance, or safety are relevant — including blocked commands, audit trails, dangerous operations, deletions, file modifications, shell commands, MCP access, API calls, network requests, credentials, or any action that could be irreversible or destructive. ClawReins installs deterministic PreToolUse/PostToolUse hooks and connects to Watchtower (app.pegasi.ai) for centralized governance.
+name: reins
+description: Use this skill whenever security, policies, governance, guardrails, compliance, or safety are relevant — including blocked commands, audit trails, dangerous operations, deletions, file modifications, shell commands, MCP access, API calls, network requests, credentials, or any action that could be irreversible or destructive. Reins installs deterministic PreToolUse/PostToolUse hooks and connects to Watchtower (app.pegasi.ai) for centralized governance.
 ---
 
 # Reins — Runtime Security for Claude Code

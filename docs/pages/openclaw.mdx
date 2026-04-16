@@ -1,0 +1,135 @@
+# OpenClaw Integration
+
+Reins integrates with OpenClaw as a native plugin. Instead of OS-level hooks, it registers on OpenClaw's `before_tool_call` event — synchronously, inside the gateway process, before any tool executes.
+
+## Install
+
+```bash
+npm install -g @pegasi/reins
+```
+
+Then add Reins to your OpenClaw plugin config:
+
+```json
+{
+  "plugins": {
+    "entries": {
+      "reins": {
+        "path": "/path/to/node_modules/@pegasi/reins",
+        "config": {
+          "defaultAction": "ASK",
+          "fallbackChannel": {
+            "channelId": "whatsapp",
+            "to": "+15551234567"
+          }
+        }
+      }
+    }
+  }
+}
+```
+
+OpenClaw discovers the plugin entry point via the `openclaw.extensions` field in `@pegasi/reins/package.json`.
+
+## How it works
+
+The plugin registers three hooks on startup:
+
+| Hook | Fires | What Reins does |
+|------|-------|-----------------|
+| `before_tool_call` | Before every tool call | Evaluates policy, blocks or approves |
+| `message_received` | Every inbound channel message | Captures sender context for OOB notifications |
+| `before_message_write` | Before transcript write | Correlates session key to channel context |
+
+And two commands, intercepted by the gateway **before the LLM sees them**:
+
+| Command | Effect |
+|---------|--------|
+| `!approve <TOKEN>` | Resolves the pending approval, agent retries |
+| `!deny <TOKEN>` | Cancels the action, denial recorded |
+
+## Return values
+
+The `before_tool_call` hook returns:
+
+| Return | Meaning |
+|--------|---------|
+| `{}` or `{ params }` | ALLOWED — execution proceeds (params may be mutated, e.g. browser session injection) |
+| `{ block: true, blockReason }` | BLOCKED — OpenClaw cancels the tool call |
+
+Fail-closed: any unhandled error in the hook returns `{ block: true }`. The gateway is fail-open by default; Reins explicitly overrides this.
+
+## Channel mode approval flow
+
+In channel mode (WhatsApp / Telegram), blocked or high-risk actions trigger an out-of-band notification sent directly to the human — the agent never sees the approval token.
+
+```
+Agent calls: bash('rm -rf /tmp/uploads')
+  → before_tool_call fires
+  → policy = ASK, severity = HIGH
+  → Reins blocks, generates token CONFIRM-AB12CD
+  → OOB notification sent to human's WhatsApp:
+
+    🛡️ Reins: approval needed
+    Action: Shell.bash — rm -rf /tmp/uploads
+    /approve CONFIRM-AB12CD  to allow
+    /deny CONFIRM-AB12CD  to block
+
+Human replies: /approve CONFIRM-AB12CD
+  → Gateway intercepts command (before LLM)
+  → approvalQueue.resolveByToken('CONFIRM-AB12CD', 'approve')
+  → Agent retries → allowed ✓
+
+Human replies: /deny CONFIRM-AB12CD
+  → Denial recorded → denial count increments cooldown escalation
+  → Agent is told the action was blocked ✓
+```
+
+Token TTL is **2 minutes**. Expired tokens return an error when `/approve` or `/deny` is called.
+
+## Catastrophic actions
+
+For CATASTROPHIC severity (e.g. bulk deletes > 20 records, `rm -rf /`, `DROP DATABASE`), Reins requires an explicit `CONFIRM-*` token — not just YES/NO. The token is delivered out-of-band only and never appears in the agent's context, preventing self-approval.
+
+## Configuration
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `defaultAction` | `ALLOW \| ASK \| DENY` | `ASK` | Fallback for unmapped tools |
+| `fallbackChannel.channelId` | `whatsapp \| telegram` | — | Channel for OOB notifications when no session context exists |
+| `fallbackChannel.to` | string | — | Phone number or chat ID |
+| `fallbackChannel.accountId` | string | — | Optional account ID for multi-account gateways |
+
+## Tool mapping
+
+OpenClaw tool names are flat strings. Reins maps them to module/method pairs for policy evaluation:
+
+| OpenClaw tool | Module | Method |
+|---------------|--------|--------|
+| `read` | FileSystem | read |
+| `write`, `edit` | FileSystem | write |
+| `bash`, `exec` | Shell | bash / exec |
+| `navigate`, `click`, `type`, `evaluate` | Browser | — |
+| `screenshot` | Browser | screenshot |
+| `fetch`, `request`, `webhook` | Network | — |
+| `send_message` | Gateway | sendMessage |
+| `mcp__plugin_playwright_playwright__*` | Browser | (mapped by action) |
+
+Any unmapped tool falls through to `defaultAction`.
+
+## Cooldown escalation
+
+After repeated denials in a session, Reins tightens its posture automatically:
+
+- **Level 1** (≥ 2 denials in 10 min): all subsequent actions require explicit approval
+- **Level 2** (≥ 4 denials): requires `CONFIRM-*` token for every action
+
+This prevents an agent that is being denied from simply retrying with slightly different arguments.
+
+## Verify
+
+```bash
+reins status   # shows plugin connection state
+reins audit    # last 50 decisions (shared log with Claude Code)
+reins stats    # allowed / blocked / approved counts
+```

@@ -1,6 +1,6 @@
 <div align="center">
   <img src="logo.png" alt="Reins Logo" width="360"/>
-  <h1>🦞 + 🪢 Reins</h1>
+  <h1>🪢 Reins</h1>
   <p><strong>Security controls for AI agents.</strong></p>
 
   <p>
@@ -14,644 +14,70 @@
   </p>
 </div>
 
-> In Greek myth, Athena gave Bellerophon the golden bridle — reins included — that let him guide Pegasus. Reins applies the same idea to AI agents: raw power is not enough — what matters is making it steerable.
+> In Greek myth, Athena gave Bellerophon the golden bridle — reins included — that let him guide Pegasus. Reins applies the same idea to AI agents: raw power is not enough — what matters is making it controllable.
 
-Reins sits between an AI agent and the real world. It’s the watchdog layer for computer-using agents. Reins protects agents at two stages:
-
-- Before runtime → security scanning
-- During runtime → action interception
-
-Think of it as `sudo` for AI agents. The first production integration is [OpenClaw](https://github.com/openclaw/openclaw). Reins plugs into the `before_tool_call` event and adds:
-
-- **Prevent** destructive actions before they execute
-- **Pause** for human approval with YES / ALLOW / CONFIRM flows
-- **Prove** what happened with durable audit logs and post-incident review
-
-**OpenClaw cannot be its own watchdog. Neither can any CUA.**
+Reins enforces deterministic security policies on every agent action via Claude Code PreToolUse and PostToolUse hooks. Policies are evaluated in under 50ms with no LLM in the enforcement path.
 
 ## Quickstart
-```
-# Install globally
+
+```bash
 npm install -g @pegasi/reins
-
-# Run interactive setup
 reins init
-
-# Restart OpenClaw
-openclaw restart
-
-# Scan environment
-reins scan
 ```
 
-During interactive `reins init`, Reins now:
-- detects the local OpenClaw install
-- applies the selected setup
-- runs the first security scan automatically
-- offers Watchtower connect
-- if Watchtower is connected, offers a default daily 9am scheduled scan using a per-user scheduler
-  - macOS: `~/Library/LaunchAgents`
-  - Linux/Unix: user `crontab`
+## Claude Code Skill
+
+Install the Reins skill to give Claude Code awareness of your security posture:
+
+```bash
+mkdir -p ~/.claude/skills/reins
+curl -o ~/.claude/skills/reins/SKILL.md \
+  https://raw.githubusercontent.com/pegasi-ai/reins/main/.claude/skills/reins/SKILL.md
+```
+
+Or clone the repo — the skill is included at `.claude/skills/reins/` automatically.
 
 ## Demo
 
 ![Reins demo](./public/clawreins-demo.gif)
 
-Hero example: an OpenClaw agent tries to bulk-delete 4,382 Gmail messages. Reins blocks it before execution.
-
-That is the core runtime story:
-- destructive action detected
-- execution paused before side effects
-- human approval required
-- decision written to the audit trail
+An OpenClaw agent tries to bulk-delete 4,382 Gmail messages. Reins blocks it before execution.
 
 ## In The News
 
 - TechCrunch (February 23, 2026): [A Meta AI security researcher said an OpenClaw agent ran amok on her inbox](https://techcrunch.com/2026/02/23/a-meta-ai-security-researcher-said-an-openclaw-agent-ran-amok-on-her-inbox/)
 
-## Intercept Example
-
-![Reins intercept example](./public/intercept_example.png)
-
-## Runtime Interception
-
-Runtime interception is the enforcement layer. It is what stops an agent mid-trajectory when the action is destructive, irreversible, or operating under risky browser state.
-
-Core capabilities:
-- Browser-state awareness for CAPTCHA, 2FA, and challenge walls
-- Irreversibility scoring for risky versus catastrophic actions
-- Runtime intervention across terminal and messaging approval channels
-- ToolShield-aligned hardening for new tool rollouts
-- Full audit logging for every approval decision
-
-## Security Scan
-
-Reins includes a security scanner that audits the local OpenClaw environment for high-signal misconfigurations before runtime problems turn into incidents.
-
-![Reins security scan](./public/clawreins_security_scan.gif)
-
-`reins scan` audits a local OpenClaw installation for high-signal security misconfigurations, writes an HTML report to `~/Downloads/scan-report.html`, and prints a `file://` link directly in the terminal.
-
-Usage:
-
-```bash
-# Run the 13-check audit and save the HTML report
-reins scan
-
-# Save the report and try to open it automatically
-reins scan --html
-
-# Machine-readable output for CI
-reins scan --json
-
-# Apply supported auto-fixes after confirmation
-reins scan --fix
-
-# Apply supported auto-fixes without prompting
-reins scan --fix --yes
-
-# Compare against the last saved baseline and alert on drift
-reins scan --monitor
-
-# Compare against the baseline and invoke a notifier when drift is detected
-reins scan --monitor --alert-command "/path/to/send-openclaw-alert.sh"
-
-# Replace the saved config baseline with the current config
-reins scan --monitor --reset-baseline
-```
-
-### Watchtower Uploads
-
-On interactive terminal runs, `reins scan` now offers to connect to Watchtower automatically when uploads are not configured yet.
-
-Default interactive flow:
-- answer `Y` to connect
-- enter your email
-- Reins provisions the Watchtower account, saves the API key to `~/.openclaw/clawreins/config.json`, and prints the dashboard URL
-- future scans upload automatically without copy-pasting keys from the dashboard
-
-For CI/CD or other headless environments, the env-var path still works:
-
-```bash
-export CLAWREINS_WATCHTOWER_BASE_URL="https://app.pegasi.ai"
-export CLAWREINS_WATCHTOWER_API_KEY="wt_your_api_key"
-reins scan
-```
-
-For local end-to-end testing without the real backend, run the mock server:
-
-```bash
-npm run mock:watchtower
-
-CLAWREINS_WATCHTOWER_BASE_URL="http://127.0.0.1:8787" reins scan
-```
-
-The mock server implements:
-- `POST /api/watchtower/connect`
-- `POST /api/scan-artifacts/ingest`
-- `GET /dashboard/:id`
-- `GET /_mock/requests`
-
-It writes received artifacts to a temp directory so you can inspect what the CLI uploaded.
-
-Supported auto-fixes:
-- Rebinding gateway host from `0.0.0.0` to `127.0.0.1`
-- Tightening config file permissions to `600`
-- Injecting a default `tools.exec.safeBins` allowlist
-- Disabling `authBypass` / `skipAuth` / `disableAuth` style flags
-
-Before any fix is applied, Reins creates a timestamped backup in `~/.scan-backup/`.
-
-### Drift Monitoring
-
-Drift monitoring is opt-in. It is designed for scheduled runs, not enabled by default.
-
-Default monitoring behavior:
-- disabled by default
-- run every 24 hours when scheduled
-- compare checks against `~/.openclaw/clawreins/scan-state.json`
-- compare config against `~/.openclaw/clawreins/config-base.json`
-- alert on worsened posture and config drift relative to the saved config baseline
-- no background auto-fix
-- HTML report still written to `~/Downloads/scan-report.html`
-
-Manual run:
-
-```bash
-reins scan --monitor
-```
-
-The first run creates a baseline. Later runs compare the current report and config against that saved baseline. Use `--reset-baseline` when you intentionally want the current config to become the new base.
-
-If you want scheduled jobs to notify through your own transport, add `--alert-command`. This command runs only when drift is detected. Reins exports these environment variables to the notifier:
-- `CLAWREINS_SCAN_SUMMARY`
-- `CLAWREINS_SCAN_VERDICT`
-- `CLAWREINS_SCAN_REPORT_PATH`
-- `CLAWREINS_SCAN_REPORT_URL`
-- `CLAWREINS_SCAN_STATE_PATH`
-- `CLAWREINS_SCAN_CONFIG_BASELINE_PATH`
-- `CLAWREINS_SCAN_WORSENED_CHECKS`
-
-That makes it easy to route alerts through:
-- an OpenClaw messaging wrapper
-- a webhook sender
-- email, Slack, Telegram, or WhatsApp bridge scripts
-
-Notifier example:
-
-```bash
-reins scan --monitor \
-  --alert-command "$HOME/bin/send-openclaw-alert.sh"
-```
-
-The alert hook is generic on purpose. The scan CLI does not directly call the in-process OpenClaw plugin API from cron or system schedulers, so the notifier command is the bridge if you want alerts to land through OpenClaw-managed messaging.
-
-#### Scheduled Runs
-
-Recommended operating model:
-- run once per day
-- use `--monitor` so each run compares against the saved baseline
-- add `--alert-command` if you want drift notifications delivered outside the terminal
-- never use `--fix` in scheduled jobs
-
-What happens on scheduled runs:
-1. The first scheduled run creates `scan-state.json` and `config-base.json` in `~/.openclaw/clawreins/`.
-2. Later runs compare the current `ScanReport` against the saved scan baseline and the current config against the saved config baseline.
-3. Reins alerts when posture worsens or when the current config differs from the saved config baseline.
-4. Every run still writes `~/Downloads/scan-report.html` so the latest full report is easy to inspect.
-
-Recommended scheduler settings:
-- frequency: every 24 hours
-- stdout/stderr: append to a dedicated log file such as `~/.openclaw/clawreins/scan-monitor.log`
-- environment: set `HOME` and `OPENCLAW_HOME` explicitly
-- notifier: use `--alert-command` for OpenClaw wrappers, webhooks, or messaging bridges
-
-Example daily job with drift logging only:
-
-```bash
-0 9 * * * /usr/bin/env \
-  HOME=$HOME \
-  OPENCLAW_HOME=$HOME/.openclaw \
-  /usr/local/bin/reins scan --monitor \
-  >> $HOME/.openclaw/clawreins/scan-monitor.log 2>&1
-```
-
-Example daily job with drift alert delivery:
-
-```bash
-0 9 * * * /usr/bin/env \
-  HOME=$HOME \
-  OPENCLAW_HOME=$HOME/.openclaw \
-  /usr/local/bin/reins scan --monitor \
-  --alert-command "$HOME/bin/send-openclaw-alert.sh" \
-  >> $HOME/.openclaw/clawreins/scan-monitor.log 2>&1
-```
-
-If you want the scheduled job to fail loudly for automation, the exit codes stay the same in monitor mode:
-- `0` for `SECURE`
-- `1` for `NEEDS ATTENTION`
-- `2` for `EXPOSED`
-
-That makes scheduled monitoring usable from `cron`, `systemd`, CI, or any wrapper that reacts to non-zero exit codes.
-
-### Security Checks
-
-| Check | Severity | Detects | Auto-fix |
-|------|----------|---------|----------|
-| `GATEWAY_BINDING` | Critical | Gateway listening on `0.0.0.0` or missing localhost binding | Yes |
-| `API_KEYS_EXPOSURE` | Critical | Plaintext API keys, tokens, passwords, or secrets stored directly in config files | No |
-| `FILE_PERMISSIONS` | Critical | Config files readable by group or other users instead of `600` | Yes |
-| `HTTPS_TLS` | Warning | Missing HTTPS/TLS or certificate-related configuration | No |
-| `SHELL_COMMAND_ALLOWLIST` | Critical | Missing `safeBins` or equivalent shell allowlist / unrestricted shell execution | Yes |
-| `SENSITIVE_DIRECTORIES` | Warning | Agent environment can still reach directories like `~/.ssh`, `~/.gnupg`, `~/.aws`, or `/etc/shadow` | No |
-| `WEBHOOK_AUTH` | Warning | Webhook endpoints configured without auth tokens or shared secrets | No |
-| `SANDBOX_ISOLATION` | Warning | No Docker or sandbox isolation detected | No |
-| `DEFAULT_WEAK_CREDENTIALS` | Critical | Default, weak, undefined, or missing gateway credentials | No |
-| `RATE_LIMITING` | Warning | No gateway throttling or rate limit configuration | No |
-| `NODEJS_VERSION` | Critical | Node.js versions affected by CVE-2026-21636 permission-model bypass window | No |
-| `CONTROL_UI_AUTH` | Critical | Control UI authentication bypass flags enabled | Yes |
-| `BROWSER_UNSANDBOXED` | Critical | Browser skill config missing `headless: true` or `sandbox: true` protection | No |
-
-Exit codes:
-- `0` = `SECURE`
-- `1` = `NEEDS ATTENTION`
-- `2` = `EXPOSED`
-
-## Why?
-
-OpenClaw can execute shell commands, modify files, and access your APIs. OS-level isolation (containers, VMs) protects your **host machine**, but it doesn't protect the **services your agent has access to**.
-
-Reins solves this by hooking into OpenClaw's `before_tool_call` plugin event. Before any dangerous action executes (writes, deletes, shell commands, API calls), the agent pauses and waits for your decision. In a terminal, you get an interactive prompt. On messaging channels (WhatsApp, Telegram), the agent asks for YES/NO/ALLOW or explicit CONFIRM token (for irreversible actions) via a dedicated `clawreins_respond` tool. Every choice is logged to an immutable audit trail. Think of it as `sudo` for your AI agent: nothing happens without your explicit permission.
-
-## Features
-
-- **Prevent**
-  Stop destructive actions before execution, score irreversibility, detect risky browser state, and harden tool rollout with ToolShield-aligned guardrails.
-- **Pause**
-  Route high-impact actions through terminal or messaging approval flows, including explicit `CONFIRM-*` tokens for catastrophic operations.
-- **Prove**
-  Preserve audit logs, approval decisions, security scan findings, and post-fix artifacts so incidents are reviewable after the fact.
-
-## Destructive Action Intercept (Pre-Execution)
-
-Reins now applies deterministic pre-execution gating for destructive actions.
-
-- Destructive calls are intercepted before execution and forced through HITL approval
-- `HIGH` severity supports `YES` / `ALLOW`
-- `CATASTROPHIC` severity requires explicit `CONFIRM-*` token
-- Fail-secure behavior: if approval tooling is unavailable, action stays blocked
-
-Environment toggles:
-
-```bash
-CLAWREINS_DESTRUCTIVE_GATING=on   # default on
-CLAWREINS_BULK_THRESHOLD=20       # default 20
-CLAWREINS_CONFIRM_THRESHOLD=80    # optional, irreversibility confirm threshold
-```
-
-Demo script (GIF-friendly):
-
-```bash
-npm run demo:destructive
-```
-
-## Quick Start
-
-### Prerequisites
-- Node.js >= 18.0.0
-- OpenClaw installed
-
-### Installation
-
-```bash
-# Install plugin
-openclaw plugins install @pegasi/reins
-
-# Run setup
-node ~/.openclaw/extensions/reins/dist/cli/index.js init
-
-# Reload gateway
-openclaw gateway restart
-```
-
-Done! Reins is now protecting your OpenClaw instance.
-
-### Building from Source
-
-Use this to run Reins from a local clone instead of the published npm package.
-
-```bash
-# Clone and build
-git clone https://github.com/pegasi-ai/reins
-cd reins
-npm install
-npm run build
-
-# Register as a linked plugin (loads from local source)
-openclaw plugins install --link .
-
-# Run setup
-node dist/cli/index.js init
-
-# Reload gateway
-openclaw gateway restart
-```
-
-After any code change, run `npm run build` and `openclaw gateway restart` — no re-registration needed.
-
-`reins init` now enables ToolShield by default:
-- Uses bundled ToolShield core from this repo first (`src/core/toolshield`)
-- Falls back to auto-install via `pip` only if bundled core is unavailable
-- Syncs bundled experiences into OpenClaw `AGENTS.md`
-- Keeps Reins runtime interception + ToolShield instruction hardening aligned
-
-## ToolShield Sync (One Command)
-
-If you use ToolShield for instruction-level hardening, sync it directly into your
-OpenClaw `AGENTS.md` through Reins:
-
-```bash
-reins toolshield-sync
-```
-
-What it does:
-- Uses bundled ToolShield core from `src/core/toolshield` when available
-- Falls back to installed/pip ToolShield if bundled core is unavailable
-- Removes previously injected ToolShield guidelines by default (idempotent sync)
-- Imports bundled experiences into OpenClaw instructions (`AGENTS.md`)
-
-ToolShield project reference: [CHATS-lab/ToolShield](https://github.com/CHATS-lab/ToolShield)
-
-Useful overrides:
-
-```bash
-# Use a different bundled model
-reins toolshield-sync --model claude-sonnet-4.5
-
-# Custom OpenClaw home/profile
-OPENCLAW_HOME=~/.openclaw-profile-a reins toolshield-sync
-
-# Target a custom AGENTS.md path
-reins toolshield-sync --agents-file /path/to/AGENTS.md
-
-# Force a specific bundled ToolShield source root
-reins toolshield-sync --bundled-dir /path/to/toolshield-root
-
-# Do not auto-install ToolShield (fail if missing)
-reins toolshield-sync --no-install
-
-# Append without unloading existing ToolShield section
-reins toolshield-sync --append
-```
-
-## How It Works
-
-### Terminal Mode (TTY)
-
-```
-Agent calls tool: write('/etc/passwd', 'hacked')
-  → before_tool_call hook fires
-  → Reins checks policy: write = ASK
-  → Interactive prompt:
-    ┌─────────────────────────────────────┐
-    │ 🦞 CLAWREINS SECURITY ALERT         │
-    │                                     │
-    │ Module: FileSystem                  │
-    │ Method: write                       │
-    │ Args: ["/etc/passwd", "hacked"]     │
-    │                                     │
-    │ ❯ ✓ Approve                         │
-    │   ✗ Reject                          │
-    └─────────────────────────────────────┘
-  → You reject → { block: true }
-  → Decision logged to audit trail
-```
-
-### Channel Mode (WhatsApp / Telegram)
-
-```
-Agent calls tool: bash('rm -rf /tmp/data')
-  → before_tool_call → policy = ASK → blocked (pending approval)
-  → Agent asks user for approval (or explicit token for irreversible actions)
-
-User replies YES (normal risk):
-  → Agent calls clawreins_respond({ decision: "yes" })
-  → before_tool_call intercepts → approves pending entry
-  → Agent retries bash('rm -rf /tmp/data') → approved ✓
-
-User replies NO:
-  → Agent calls clawreins_respond({ decision: "no" })
-  → before_tool_call intercepts → denies pending entry
-  → Agent does NOT retry → cancelled ✓
-
-For high irreversibility actions:
-  → Reins returns token requirement (e.g. CONFIRM-AB12CD)
-  → Agent calls clawreins_respond({ decision: "confirm", confirmation: "CONFIRM-AB12CD" })
-  → Retry proceeds only after token match ✓
-```
-
-The `clawreins_respond` tool is registered automatically via `api.registerTool()` when the gateway supports it (`yes`, `no`, `allow`, `confirm`).
-
-### Memory-Aware Pre-Turn Forecasting
-
-Before execution, Reins now evaluates accumulated session memory and predicts
-high-risk turn `N+1` trajectories.
-
-Signals:
-- **Drift score**: semantic drift from initial intent to current trajectory
-- **Salami index**: low-risk looking steps composing into a harmful chain
-- **Commitment creep**: rising irreversibility and narrowing rollback options
-
-When memory trajectory risk crosses threshold, Reins escalates to HITL before
-execution and includes predicted next-step danger paths in the approval summary.
-
-## Security Policies
-
-Reins uses three decision types:
-
-| Policy | Behavior |
-|--------|----------|
-| **ALLOW** | Execute immediately (e.g., file reads) |
-| **ASK** | Prompt for approval (e.g., file writes) |
-| **DENY** | Block automatically (e.g., file deletes) |
-
-Default policy (Balanced):
-- FileSystem: read=ALLOW, write=ASK, delete=DENY
-- Shell: bash=ASK, exec=ASK
-- Browser: screenshot=ALLOW, navigate/click/type/evaluate=ASK
-- Gateway: sendMessage=ASK
-- Network: fetch=ASK, request=ASK
-- Everything else: ASK (fail-secure default)
-
-> **Customizable:** Every rule is editable. Policies are stored as plain JSON at `~/.openclaw/clawreins/policy.json`. See [Customizing Security Policies](docs/policies.md) for the full schema, path filtering, and examples.
-
-## CLI Commands
-
-```bash
-reins init        # Interactive setup wizard
-reins configure   # Alias for init (OpenClaw configure entrypoint)
-reins configure --non-interactive --json  # Automation-friendly machine output
-reins policy      # Manage security policies
-reins stats       # View statistics
-reins audit       # View decision history
-reins reset       # Reset statistics
-reins disable     # Temporarily disable
-reins enable      # Re-enable
-reins toolshield-sync  # Sync ToolShield guardrails into AGENTS.md
-reins upgrade     # Reinstall latest @pegasi/reins in OpenClaw + restart gateway
-reins update      # Alias for upgrade
-reins scan        # Run 13 security checks and save an HTML report
-reins scan --fix  # Backup config and apply supported remediations
-reins scan --monitor  # Compare with the last baseline and alert on drift
-reins scan --monitor --reset-baseline  # Accept the current config as the new monitor baseline
-reins scan --monitor --alert-command "/path/to/notifier.sh"  # Run a notifier on drift
-```
-
-## Example: View Audit Trail
-
-```bash
-$ reins audit --lines 5
-
-16:05:00 | FileSystem.read              | ALLOWED    |   0.0s
-16:06:00 | FileSystem.write             | APPROVED   |   3.5s (human)
-16:07:00 | Shell.bash                   | REJECTED   |   1.2s (human)
-16:08:00 | FileSystem.delete            | BLOCKED    |   0.0s - Policy: DENY
-```
-
-## Example: View Statistics
-
-```bash
-$ reins stats
-
-📊 Reins Statistics
-
-Total Calls:    142
-
-Decisions:
-  ✅ Allowed:      35 (24.6%)
-  ✅ Approved:     89 (62.7%) - by user
-  ❌ Rejected:     12 (8.5%)  - by user
-  🚫 Blocked:       6 (4.2%)  - by policy
-
-Average Decision Time: 2.8s
-```
-
-## Data Storage
-
-All data stored in `~/.openclaw/clawreins/`:
-
-```
-~/.openclaw/clawreins/
-├── policy.json       # Your security rules
-├── decisions.jsonl   # Audit trail (append-only)
-├── stats.json        # Statistics
-├── scan-state.json   # Last scan baseline
-├── config-base.json  # Saved config baseline for monitor mode
-├── browser-sessions.json  # Encrypted persistent browser auth/session state
-└── clawreins.log          # Application logs
-```
-
-## Use as a Library
-
-```typescript
-import { Interceptor, createToolCallHook } from '@pegasi/reins';
-
-// Create interceptor with default policy
-const interceptor = new Interceptor();
-
-// Create a hook handler for OpenClaw's before_tool_call event
-const hook = createToolCallHook(interceptor);
-
-// Register with the OpenClaw plugin API
-api.on('before_tool_call', hook);
-```
-
-## Protected Tools
-
-Reins intercepts every tool mapped in `TOOL_TO_MODULE`:
-- **FileSystem**: read, write, edit, glob
-- **Shell**: bash, exec
-- **Browser**: navigate, screenshot, click, type, evaluate
-- **Network**: fetch, request, webhook, download
-- **Gateway**: listSessions, listNodes, sendMessage
-
-Any unmapped tool falls through to `defaultAction` (ASK by default).
-
-## Architecture
-
-```
-src/
-├── core/
-│   ├── Interceptor.ts    # Policy evaluation engine
-│   ├── Arbitrator.ts     # Human-in-the-loop (TTY prompt / channel queue)
-│   ├── ApprovalQueue.ts  # In-memory approval state for channel mode
-│   ├── MemoryRiskForecaster.ts  # Drift/salami/commitment pre-turn forecasting
-│   ├── toolshield/       # Bundled ToolShield core used for default sync
-│   └── Logger.ts         # Winston-based logging
-├── plugin/
-│   ├── index.ts              # Plugin entry point (hook + tool registration)
-│   ├── tool-interceptor.ts   # before_tool_call handler + clawreins_respond intercept
-│   └── config-manager.ts     # OpenClaw config management (register/unregister)
-├── storage/        # Persistence (PolicyStore, DecisionLog, StatsTracker)
-├── cli/            # Command-line interface
-├── toolshield/     # ToolShield sync integration helpers
-├── types.ts        # TypeScript definitions
-└── config.ts       # Default policies
-```
-
-## Development
-
-```bash
-# Clone repo
-git clone github.com/pegasi-ai/reins
-cd reins
-
-# Install dependencies
-npm install
-
-# Build
-npm run build
-
-# Test CLI locally
-node dist/cli/index.js init
-
-# Link for global testing
-npm link
-reins --help
-```
-
-## Security Guarantees
-
-✅ **Zero Trust** - Every action evaluated
-✅ **Synchronous Blocking** - Agent waits for approval
-✅ **No Bypass** - Plugin hooks intercept all tool calls
-✅ **Immutable Audit** - JSON Lines append-only format
-✅ **Human Authority** - Critical decisions need approval
-✅ **Fail Secure** - Unknown actions default to ASK/DENY
+## What Reins does
+
+- **Prevent** — Block destructive actions before execution. Score irreversibility. Detect risky browser state.
+- **Pause** — Route high-impact actions through terminal or messaging approval flows. Require explicit `CONFIRM-*` tokens for catastrophic operations.
+- **Prove** — Preserve an immutable audit trail of every decision, approval, and block.
+
+## Security guarantees
+
+- **Zero Trust** — every action evaluated before execution
+- **Synchronous** — agent cannot proceed until the hook exits
+- **No network in the hot path** — policies cached locally, enforced offline
+- **Fail-closed** — any unhandled hook error blocks the action
+- **Immutable audit** — append-only JSONL at `~/.openclaw/clawreins/decisions.jsonl`
+
+## Documentation
+
+Full docs at [docs/](./docs/):
+
+- [Getting Started](./docs/pages/getting-started.mdx)
+- [How It Works](./docs/pages/how-it-works.mdx)
+- [Security Policies](./docs/pages/policies.mdx)
+- [CLI Reference](./docs/pages/cli.mdx)
+- [Security Scan](./docs/pages/scan.mdx)
+- [Watchtower](./docs/pages/watchtower.mdx)
+- [Use as a Library](./docs/pages/library.mdx)
+- [Architecture](./docs/pages/architecture.mdx)
 
 ## Contributing
 
-We believe in safe AI. PRs welcome!
-
-1. Fork the repo
-2. Create your feature branch: `git checkout -b feature/amazing`
-3. Commit changes: `git commit -m 'Add amazing feature'`
-4. Push: `git push origin feature/amazing`
-5. Open a Pull Request
-
-See [CONTRIBUTING.md](CONTRIBUTING.md) for details.
+PRs welcome. See [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## License
 
-Apache 2.0 - See [LICENSE](LICENSE) for details.
-
-## Acknowledgments
-
-- Built for [OpenClaw](https://github.com/openclaw) agents
-- ToolShield methodology and implementation from [CHATS-lab/ToolShield](https://github.com/CHATS-lab/ToolShield)
-- Inspired by the need for human oversight in AI systems
-- Thanks to the AI safety community
-
----
-
-**Built with ❤️ for a safer AI future.**
+Apache 2.0 — see [LICENSE](LICENSE).
