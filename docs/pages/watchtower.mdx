@@ -1,0 +1,66 @@
+# Watchtower
+
+Watchtower ([app.pegasi.ai](https://app.pegasi.ai)) provides centralized policy management and audit review across all agents and devices.
+
+![Watchtower dashboard](/watchtower.png)
+
+## What Watchtower provides
+
+- **Security score timeline** — posture score over time with drift alerts when checks regress
+- **Scan history** — every `reins scan` result across all agents and devices, searchable
+- **MCP Control Panel** — per-tool allow/block policies, resource access controls, audit log
+- **Org-wide shell policy** — admin-enforced rules (auto-deny `rm -rf`, `DROP TABLE`, `curl | bash`) that cannot be locally overridden
+- **Full audit log** — every agent decision: tool, action, policy decision, rule fired, timestamp
+- **Team policies** — policy tiers pulled on a schedule and merged with local overrides; CRITICAL rules are immutable
+
+## Connect
+
+Connect during `reins init` (Step 7 prompts for an API key), or set environment variables:
+
+```bash
+export CLAWREINS_WATCHTOWER_API_KEY=wt_...
+export CLAWREINS_WATCHTOWER_BASE_URL=https://app.pegasi.ai  # default
+```
+
+Config is saved to `~/.openclaw/clawreins/config.json`.
+
+### Interactive provisioning
+
+On interactive terminal runs, `reins scan` offers to connect automatically:
+
+1. Answer `Y` to connect
+2. Enter your email
+3. Reins provisions the account, saves the API key, and prints the dashboard URL
+4. Future scans upload automatically
+
+## Sync
+
+```bash
+reins sync
+```
+
+Pulls latest policies from Watchtower and flushes any pending audit entries that failed to upload.
+
+## Offline behavior
+
+If Watchtower is unreachable, last-cached policies continue to enforce. Reins never fails open.
+
+Pending audit entries are buffered locally and flushed on the next successful sync.
+
+## Local mock server
+
+For local end-to-end testing without the real backend:
+
+```bash
+npm run mock:watchtower
+
+CLAWREINS_WATCHTOWER_BASE_URL="http://127.0.0.1:8787" reins scan
+```
+
+The mock server implements:
+- `POST /api/watchtower/connect`
+- `POST /api/scan-artifacts/ingest`
+- `GET /dashboard/:id`
+- `GET /_mock/requests`
+
+It writes received artifacts to a temp directory for inspection.

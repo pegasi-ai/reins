@@ -1,0 +1,149 @@
+# How It Works
+
+Reins intercepts every tool call before execution via a Claude Code PreToolUse hook. The hook evaluates the action against cached policies in under 50ms — no network call, no model inference.
+
+## Terminal Mode (TTY)
+
+When running interactively in a terminal, blocked or flagged actions prompt for human approval:
+
+```
+Agent calls tool: write('/etc/passwd', 'hacked')
+  → PreToolUse hook fires
+  → Reins checks policy: write = ASK
+  → Interactive prompt:
+    ┌─────────────────────────────────────┐
+    │ 🪢 REINS SECURITY ALERT             │
+    │                                     │
+    │ Module: FileSystem                  │
+    │ Method: write                       │
+    │ Args: ["/etc/passwd", "hacked"]     │
+    │                                     │
+    │ ❯ ✓ Approve                         │
+    │   ✗ Reject                          │
+    └─────────────────────────────────────┘
+  → You reject → hook exits 2 → blocked
+  → Decision logged to audit trail
+```
+
+## Channel Mode (WhatsApp / Telegram)
+
+In non-TTY environments (background agents, messaging workflows), approval flows out-of-band through a messaging channel. The key property: **the approval token is sent directly to the human and never passes through the agent context**, so the agent cannot self-approve.
+
+```
+Agent calls tool: bash('rm -rf /tmp/data')
+  → PreToolUse hook → policy = ASK → action blocked pending approval
+  → Reins sends OOB notification to human's WhatsApp/Telegram:
+
+    🛡️ Reins: approval needed
+    Action: Shell.bash — rm -rf /tmp/data
+    /approve CONFIRM-AB12CD  to allow
+    /deny CONFIRM-AB12CD  to block
+
+Human replies /approve CONFIRM-AB12CD:
+  → Gateway intercepts command BEFORE the LLM sees it
+  → approvalQueue resolves → agent retries → approved ✓
+
+Human replies /deny CONFIRM-AB12CD:
+  → Gateway intercepts → action cancelled
+  → Denial recorded, cooldown escalation incremented ✓
+```
+
+Token TTL is 2 minutes. Expired tokens return an error on `/approve` or `/deny`.
+
+For HIGH severity actions, a plain `/approve TOKEN` suffices. For CATASTROPHIC severity, the explicit `CONFIRM-*` token is required — preventing approval by accident or by a generic "yes" reply.
+
+## Severity Levels
+
+| Severity | Approval required | Example |
+|----------|------------------|---------|
+| `HIGH` | `YES` or `ALLOW` | `git push --force`, `DROP TABLE` |
+| `CATASTROPHIC` | Explicit `CONFIRM-*` token | `rm -rf /`, bulk delete 1000+ records |
+
+## Memory-Aware Pre-Turn Forecasting
+
+Before execution, Reins evaluates accumulated session memory to predict high-risk `N+1` trajectories.
+
+Three signals are tracked:
+
+- **Drift score** — semantic drift from initial intent to current trajectory
+- **Salami index** — individually low-risk steps composing into a harmful chain
+- **Commitment creep** — rising irreversibility and narrowing rollback options
+
+When trajectory risk crosses the configured threshold, Reins escalates to HITL before execution and includes predicted next-step danger paths in the approval summary.
+
+## Why No Model in the Enforcement Path
+
+Reins deliberately keeps enforcement synchronous, deterministic, and model-free. This is not a limitation — it is the security property.
+
+**Prompt injection via tool output.** Any model that evaluates tool calls also reads their arguments and context. Adversarial content in a file, API response, or web page can manipulate a model's decision. A regex rule matching `rm -rf /` cannot be social-engineered.
+
+**Non-determinism.** The same action evaluated twice by a model can produce different decisions. A security control that isn't reproducible isn't a control.
+
+**Attack surface.** A model in the enforcement path is a new component that can be compromised, poisoned, or simply wrong. Every additional inference step is a new failure mode.
+
+**Latency.** Even a fast local SLM adds 200–500ms per tool call. Reins enforces in under 50ms, synchronous and local.
+
+The enforcement layer — PreToolUse — stays deterministic. The PostToolUse layer is where learning belongs.
+
+## Self-Learning Policy Agent (PostToolUse)
+
+PostToolUse hooks fire after every action and are non-blocking. They don't affect enforcement latency or correctness. This is where you can plug in a custom agent that observes decisions and improves policy over time.
+
+The decisions JSONL at `~/.openclaw/clawreins/decisions.jsonl` is the input stream:
+
+```jsonl
+{"timestamp":"2026-04-16T10:00:00Z","module":"Shell","method":"bash","decision":"APPROVED","tool":"Bash","decisionTime":3200}
+{"timestamp":"2026-04-16T10:01:00Z","module":"Shell","method":"bash","decision":"APPROVED","tool":"Bash","decisionTime":2800}
+{"timestamp":"2026-04-16T10:02:00Z","module":"Shell","method":"bash","decision":"BLOCKED","tool":"Bash","reason":"critical: rm -rf /","decisionTime":0}
+```
+
+A learning agent registered as a PostToolUse hook can:
+
+- **Surface approval patterns** — "You've approved `git push` 31 times without a single rejection. Consider moving it to ALLOW."
+- **Detect anomalies** — "This action pattern hasn't appeared in this session before and has a high irreversibility score."
+- **Generate richer approval summaries** — enrich the human-facing message in channel mode with plain-English risk context, without affecting the underlying ALLOW/DENY decision.
+- **Suggest policy edits** — write candidate changes to a staging file for the user to review and accept via `reins policy`.
+- **Auto-apply low-risk relaxations** — optionally promote ASK → ALLOW for patterns approved above a configurable threshold (e.g., 20 consecutive approvals, no rejections).
+
+### Constraints the learning agent must respect
+
+| Rule | Reason |
+|------|--------|
+| PostToolUse only — never PreToolUse | PreToolUse is synchronous and deterministic; a model there breaks both |
+| Can tighten posture (ASK → DENY) immediately | Fail-safe direction |
+| Can loosen posture (ASK → ALLOW) only with human confirmation by default | Prevents a manipulated agent from silently opening permissions |
+| Never writes directly to `policy.json` in auto-apply mode without an audit entry | Every policy change must be traceable |
+| Model errors must not affect enforcement | The PostToolUse hook failing cannot unblock a PreToolUse decision |
+
+### Example: custom PostToolUse learning hook
+
+```bash
+# .claude/settings.json (Claude Code)
+{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "",
+        "hooks": [{ "type": "command", "command": "node ~/my-policy-agent/learn.js" }]
+      }
+    ]
+  }
+}
+```
+
+The hook receives the decision record on stdin and can write policy suggestions to a staging file. `reins policy` picks up staged suggestions and prompts for acceptance.
+
+## Fail-Secure Behavior
+
+- If Watchtower is unreachable, last-cached policies still enforce
+- If approval tooling is unavailable, catastrophic actions stay blocked
+- Unknown tools fall through to `defaultAction` (ASK by default)
+- Any unhandled hook error blocks the action (fail-closed)
+
+## Hook Exit Codes
+
+| Exit code | Meaning |
+|-----------|---------|
+| `0` | ALLOWED — proceed |
+| `2` | BLOCKED — policy violation |
+| `0` + JSON `decision: WARN` | WARNING — proceed with caution |

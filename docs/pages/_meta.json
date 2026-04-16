@@ -1,0 +1,13 @@
+{
+  "index": "Overview",
+  "getting-started": "Getting Started",
+  "claude-code": "Claude Code",
+  "openclaw": "OpenClaw",
+  "how-it-works": "How It Works",
+  "policies": "Security Policies",
+  "cli": "CLI Reference",
+  "scan": "Security Scan",
+  "watchtower": "Watchtower",
+  "library": "Use as a Library",
+  "architecture": "Architecture"
+}

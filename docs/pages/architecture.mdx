@@ -1,0 +1,102 @@
+# Architecture
+
+## Source layout
+
+```
+src/
+├── core/
+│   ├── Interceptor.ts           # Policy evaluation engine
+│   ├── Arbitrator.ts            # Human-in-the-loop (TTY prompt / channel queue)
+│   ├── ApprovalQueue.ts         # In-memory approval state for channel mode
+│   ├── DestructiveClassifier.ts # Regex/heuristic pre-execution classifier
+│   ├── IrreversibilityScorer.ts # Irreversibility scoring
+│   ├── MemoryRiskForecaster.ts  # Drift/salami/commitment pre-turn forecasting
+│   ├── BrowserChallengeDetector.ts  # CAPTCHA, 2FA, challenge-wall detection
+│   ├── TrustRateLimiter.ts      # Escalation rate limiting
+│   ├── toolshield/              # Bundled ToolShield core
+│   └── Logger.ts                # Winston-based structured logging
+├── hooks/
+│   ├── pre-tool-use.ts          # Claude Code PreToolUse hook (exit 0/2)
+│   └── post-tool-use.ts         # Claude Code PostToolUse hook (logging)
+├── plugin/
+│   ├── index.ts                 # OpenClaw plugin entry point
+│   ├── tool-interceptor.ts      # before_tool_call handler
+│   ├── approval-commands.ts     # /approve and /deny command handlers
+│   ├── oob-notifier.ts          # Out-of-band approval notifications
+│   └── config-manager.ts        # OpenClaw config management
+├── storage/
+│   ├── PolicyStore.ts           # Policy persistence
+│   ├── DecisionLog.ts           # Audit trail (JSONL)
+│   ├── StatsTracker.ts          # Enforcement statistics
+│   └── BrowserSessionStore.ts   # Encrypted browser session state
+├── cli/
+│   ├── index.ts                 # CLI entry point
+│   ├── init.ts                  # Setup wizard
+│   ├── scan.ts                  # Security scan command
+│   └── commands/                # Individual CLI commands
+├── lib/
+│   ├── hook-installer.ts        # Installs hooks into .claude/settings.json
+│   ├── watchtower-client.ts     # Watchtower API client
+│   ├── pending-queue.ts         # Local buffer for offline audit entries
+│   └── run-manager.ts           # Session run ID management
+├── toolshield/                  # ToolShield sync integration
+├── types.ts                     # TypeScript definitions
+└── config.ts                    # Default policies
+```
+
+## Decision flow
+
+```
+Tool call →
+  PreToolUse hook →
+    Load cached policies (sync, <50ms) →
+      Evaluate shell rules →
+        Check built-in critical patterns →
+          Evaluate file path rules →
+            Evaluate MCP rules →
+              Exit 0 (ALLOW) or Exit 2 (BLOCK)
+```
+
+## Enforcement guarantees
+
+- **Synchronous** — the agent cannot proceed until the hook exits
+- **No network in the hot path** — policies are cached locally
+- **Fail-closed** — any unhandled hook error blocks the action
+- **No bypass** — Claude Code hook runner cannot skip exit 2
+
+## Development
+
+```bash
+# Clone
+git clone https://github.com/pegasi-ai/reins
+cd reins
+npm install
+
+# Build
+npm run build
+
+# Tests
+npm test
+
+# Lint
+npm run lint
+
+# Link for global testing
+npm link
+reins --help
+```
+
+## Testing the hook directly
+
+```bash
+echo '{"tool_name":"Bash","tool_input":{"command":"rm -rf /"}}' \
+  | node dist/hooks/pre-tool-use.js && echo allowed || echo blocked
+```
+
+## Mock Watchtower server
+
+```bash
+npm run mock:watchtower
+```
+
+Starts a local server on port 8787 that implements the Watchtower API for end-to-end testing.

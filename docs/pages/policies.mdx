@@ -1,0 +1,158 @@
+# Security Policies
+
+Reins uses three decision types for every tool action:
+
+| Decision | Behavior |
+|----------|----------|
+| `ALLOW` | Execute immediately |
+| `ASK` | Prompt for human approval |
+| `DENY` | Block automatically |
+
+## Default Policy (Balanced)
+
+| Module | Action | Decision |
+|--------|--------|----------|
+| FileSystem | read | ALLOW |
+| FileSystem | write | ASK |
+| FileSystem | delete | DENY |
+| Shell | bash, exec | ASK |
+| Browser | screenshot | ALLOW |
+| Browser | navigate, click, type, evaluate | ASK |
+| Gateway | sendMessage | ASK |
+| Network | fetch, request | ASK |
+| _(everything else)_ | — | ASK |
+
+## Built-in Rules
+
+### Always blocked (CRITICAL)
+
+- `rm -rf /` or `rm -rf ~/` — recursive root/home deletion
+- `mkfs` — filesystem format
+- Fork bomb pattern `:(){ :|:& }`
+- `dd` to disk device
+
+### Blocked by default (HIGH, user-overridable)
+
+- `DROP TABLE/DATABASE/SCHEMA`
+- `git push --force`
+- `TRUNCATE TABLE`
+- `DELETE FROM <table>` without WHERE clause
+- Pipe-to-shell (`| bash`, `| sh`)
+
+### Protected file paths (writes blocked)
+
+- `~/.ssh`
+- `~/.gnupg`
+- `~/.env`
+- `~/.openclaw/clawreins`
+- `/etc/passwd`, `/etc/shadow`
+
+## Policy Merge Order
+
+Policies are evaluated highest-to-lowest priority:
+
+1. Watchtower org policies — CRITICAL rules are immutable
+2. Watchtower team policies
+3. Local overrides at `~/.openclaw/clawreins/policy.json`
+4. Built-in defaults
+
+## Editing Policies
+
+```bash
+reins policy
+```
+
+Policies are stored as plain JSON at `~/.openclaw/clawreins/policy.json` and are editable directly.
+
+Example `policy.json`:
+
+```json
+{
+  "modules": {
+    "FileSystem": {
+      "read":   "ALLOW",
+      "write":  "ASK",
+      "delete": "DENY"
+    },
+    "Shell": {
+      "bash": "ASK",
+      "exec": "ASK"
+    },
+    "Browser": {
+      "screenshot": "ALLOW",
+      "navigate":   "ASK",
+      "click":      "ASK",
+      "type":       "ASK",
+      "evaluate":   "ASK"
+    },
+    "Network": {
+      "fetch":   "ASK",
+      "request": "ASK"
+    }
+  },
+  "defaultAction": "ASK"
+}
+```
+
+## OWASP Coverage
+
+Reins maps across three OWASP frameworks. Coverage is marked ✅ (addressed), ⚠️ (partial), or 🗺️ (roadmap).
+
+### OWASP MCP Top 10
+
+The [OWASP MCP Top 10](https://owasp.org/www-project-mcp-top-10/) covers security risks specific to Model Context Protocol servers and tool ecosystems.
+
+| Risk | Description | Reins Coverage |
+|------|-------------|----------------|
+| MCP01 — Token Mismanagement | Hard-coded credentials and secrets in config or protocol logs | ✅ `API_KEYS_EXPOSURE`, `DEFAULT_WEAK_CREDENTIALS` |
+| MCP02 — Privilege Escalation via Scope Creep | Permissions expanding beyond intended boundaries | ✅ `SHELL_COMMAND_ALLOWLIST`, `SENSITIVE_DIRECTORIES`, `FILE_PERMISSIONS` |
+| MCP03 — Tool Poisoning | Malicious tool descriptions altering agent behavior | ⚠️ MCP empty-matcher hook intercepts all MCP calls; `CONTROL_UI_AUTH` |
+| MCP04 — Supply Chain Attacks | Compromised dependencies or connectors | ⚠️ `NODEJS_VERSION` (CVE detection) |
+| MCP05 — Command Injection & Execution | Untrusted input used to construct shell commands or code | ✅ Shell DENY rules, destructive classifier, protected paths |
+| MCP06 — Intent Flow Subversion | Manipulation of agent decision logic and intended flow | ⚠️ Memory risk forecaster (drift score, salami index) |
+| MCP07 — Insufficient Authentication | Weak or missing auth on MCP infrastructure | ✅ `DEFAULT_WEAK_CREDENTIALS`, `WEBHOOK_AUTH` |
+| MCP08 — Lack of Audit and Telemetry | No visibility into MCP server operations | ✅ Immutable decisions JSONL, Watchtower upload |
+| MCP09 — Shadow MCP Servers | Unsupervised MCP instances outside governance | 🗺️ Roadmap: `reins inventory` |
+| MCP10 — Context Injection & Over-Sharing | Sensitive context leaking across tasks or users | 🗺️ Roadmap |
+
+### OWASP Top 10 for Agentic Applications 2026
+
+The [OWASP ASI Top 10](https://genai.owasp.org/resource/owasp-top-10-for-agentic-applications-for-2026/) addresses autonomous agent systems with multi-step decision-making and persistent memory.
+
+| Risk | Description | Reins Coverage |
+|------|-------------|----------------|
+| ASI01 — Agent Goal Hijack | Redirecting agent objectives via prompt injection or tool output manipulation | ⚠️ Memory risk forecaster (drift score) |
+| ASI02 — Tool Misuse & Exploitation | Agents misusing legitimate tools due to prompt injection or misalignment | ✅ Shell DENY rules, destructive classifier, irreversibility scorer |
+| ASI03 — Agent Identity & Privilege Abuse | Exploiting inherited credentials or delegated permissions | ⚠️ `FILE_PERMISSIONS`, `SENSITIVE_DIRECTORIES` |
+| ASI04 — Agentic Supply Chain Compromise | Tampered tools, models, or agent personas | ⚠️ `NODEJS_VERSION`; 🗺️ skill scanning (roadmap) |
+| ASI05 — Unexpected Code Execution | Agents generating or executing attacker-controlled code | ✅ Shell DENY rules, pipe-to-shell blocking |
+| ASI06 — Memory & Context Poisoning | Persistent corruption of agent memory or RAG stores | ⚠️ Memory risk forecaster; 🗺️ SOUL.md/MEMORY.md integrity (roadmap) |
+| ASI07 — Insecure Inter-Agent Communication | Spoofed or intercepted agent-to-agent messages | 🗺️ Roadmap |
+| ASI08 — Cascading Agent Failures | Single-point faults propagating through multi-agent workflows | 🗺️ Roadmap |
+| ASI09 — Human-Agent Trust Exploitation | Over-reliance on agents leading to unsafe approvals | ✅ HITL approvals, OOB token delivery (agent cannot self-approve) |
+| ASI10 — Rogue Agents | Compromised or misaligned agents diverging from intended behavior | ⚠️ Cooldown escalation, memory risk forecaster; 🗺️ behavioral anomaly detection (roadmap) |
+
+### OWASP Agentic Skills Top 10
+
+The [OWASP AST Top 10](https://owasp.org/www-project-agentic-skills-top-10/) focuses on skill-level risks in agentic runtimes.
+
+| Risk | Description | Reins Coverage |
+|------|-------------|----------------|
+| AST01 — Skill Injection | Malicious instructions in skill files | ✅ `CONTROL_UI_AUTH`, `WEBHOOK_AUTH` |
+| AST02 — Trust Prompt Configuration | Misconfigured trust boundaries | 🗺️ Roadmap |
+| AST03 — Excessive Permissions | Over-privileged agent access | ✅ `SHELL_COMMAND_ALLOWLIST`, `SENSITIVE_DIRECTORIES`, `FILE_PERMISSIONS` |
+| AST04 — Runtime Supply Chain | Compromised runtime dependencies | 🗺️ Roadmap |
+| AST05 — Memory Integrity | SOUL.md / MEMORY.md tampering | 🗺️ Roadmap |
+| AST06 — Supply Chain | Vulnerable dependencies | ✅ `NODEJS_VERSION` (CVE detection) |
+| AST07 — Sandbox Escape | Agent breaking out of isolation | ✅ `SANDBOX_ISOLATION`, `BROWSER_UNSANDBOXED` |
+| AST08 — Network Exposure | Unprotected network interfaces | ✅ `GATEWAY_BINDING`, `HTTPS_TLS`, `RATE_LIMITING` |
+| AST09 — Secrets Exposure | Leaked credentials and tokens | ✅ `API_KEYS_EXPOSURE`, `DEFAULT_WEAK_CREDENTIALS` |
+| AST10 — Behavioral Anomaly | Detecting unexpected agent behavior patterns | 🗺️ Roadmap |
+
+## Environment Toggles
+
+```bash
+CLAWREINS_DESTRUCTIVE_GATING=on    # default: on
+CLAWREINS_BULK_THRESHOLD=20        # bulk delete threshold, default: 20
+CLAWREINS_CONFIRM_THRESHOLD=80     # irreversibility score requiring CONFIRM token
+```
