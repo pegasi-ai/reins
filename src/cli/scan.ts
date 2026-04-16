@@ -10,6 +10,22 @@ import os from 'os';
 import path from 'path';
 import { FixAction, FixResult, ScanCheck, ScanReport, SecurityScanner } from '../core/SecurityScanner';
 import { logger } from '../core/Logger';
+import {
+  ConfigDiffEntry,
+  DriftComparison,
+  JsonValue,
+  getConfigBaselinePath,
+  getOpenclawConfigPath,
+  getScanStatePath,
+  WatchtowerScanArtifact,
+  writeWatchtowerArtifact,
+} from './watchtower-artifact';
+import { buildWatchtowerApiUrl, connectWatchtowerAccount, uploadWatchtowerArtifact } from './watchtower';
+import {
+  DEFAULT_WATCHTOWER_BASE_URL,
+  resolveWatchtowerCredentials,
+  saveWatchtowerSettings,
+} from '../storage/WatchtowerConfig';
 
 interface ScanCommandOptions {
   alertCommand?: string;
@@ -26,29 +42,10 @@ interface ScanMonitorState {
   report: ScanReport;
 }
 
-type JsonValue = null | boolean | number | string | JsonValue[] | { [key: string]: JsonValue };
-
-interface ConfigDiffEntry {
-  path: string;
-  kind: 'added' | 'removed' | 'changed';
-  previousValue?: JsonValue;
-  currentValue?: JsonValue;
-}
-
-interface DriftComparison {
-  baselineCreated: boolean;
-  baselineReportUnhealthy: boolean;
-  configBaselineCreated: boolean;
-  corruptedStateRecovered: boolean;
-  configChanges: ConfigDiffEntry[];
-  verdictWorsened: boolean;
-  worsenedChecks: Array<{
-    id: string;
-    previousStatus: ScanCheck['status'] | 'NEW';
-    currentStatus: ScanCheck['status'];
-    message: string;
-  }>;
-  previousTimestamp?: string;
+export interface SetupScanResult {
+  report: ScanReport;
+  reportPath: string;
+  watchtowerConfigured: boolean;
 }
 
 const DEFAULT_ALERT_TIMEOUT_MS = 30_000;
@@ -79,8 +76,15 @@ export async function scanCommand(options: ScanCommandOptions): Promise<void> {
     const scanner = new SecurityScanner();
     let report = await scanner.run();
     let monitorComparison: DriftComparison | null = null;
+    const command = renderScanCommand();
 
     if (options.json) {
+      const { artifact } = await writeWatchtowerArtifact({
+        command,
+        report,
+        monitorComparison,
+      });
+      await maybeUploadWatchtowerArtifact(artifact, true);
       console.log(JSON.stringify(report, null, 2));
       process.exitCode = exitCodeFor(report);
       return;
@@ -114,6 +118,15 @@ export async function scanCommand(options: ScanCommandOptions): Promise<void> {
       renderMonitorSummary(monitorComparison, report);
       await maybeSendMonitorAlert(options.alertCommand, monitorComparison, report, reportPath);
     }
+
+    const { artifact, artifactPath } = await writeWatchtowerArtifact({
+      command,
+      report,
+      monitorComparison,
+    });
+    renderWatchtowerArtifactSummary(artifactPath);
+    await maybeUploadWatchtowerArtifact(artifact, false);
+
     if (options.html) {
       openHtmlReport(reportPath);
     }
@@ -124,6 +137,31 @@ export async function scanCommand(options: ScanCommandOptions): Promise<void> {
     logger.error('Scan command failed', { error });
     process.exit(1);
   }
+}
+
+export async function runSetupScan(): Promise<SetupScanResult> {
+  const scanner = new SecurityScanner();
+  const report = await scanner.run();
+  const command = 'clawreins init';
+
+  renderTerminalReport(report);
+
+  const reportPath = await writeHtmlReport(report);
+  renderHtmlReportSummary(reportPath, false);
+
+  const { artifact, artifactPath } = await writeWatchtowerArtifact({
+    command,
+    report,
+    monitorComparison: null,
+  });
+  renderWatchtowerArtifactSummary(artifactPath);
+  const uploadResult = await maybeUploadWatchtowerArtifact(artifact, false);
+
+  return {
+    report,
+    reportPath,
+    watchtowerConfigured: uploadResult.watchtowerConfigured,
+  };
 }
 
 async function maybeApplyFixes(
@@ -253,6 +291,7 @@ async function updateMonitorState(report: ScanReport, resetBaseline: boolean): P
 
   const currentSnapshot = await loadCurrentConfigSnapshot();
   const comparison = compareReports(previousState?.report, report, corruptedStateRecovered);
+  comparison.baselineReset = resetBaseline;
   comparison.configBaselineCreated = previousSnapshot === null || resetBaseline;
   comparison.configChanges = compareConfigs(previousSnapshot, currentSnapshot);
 
@@ -369,6 +408,7 @@ function compareReports(
   if (!previous) {
     return {
       baselineCreated: true,
+      baselineReset: false,
       baselineReportUnhealthy: current.verdict !== 'SECURE',
       configBaselineCreated: false,
       corruptedStateRecovered,
@@ -406,6 +446,7 @@ function compareReports(
 
   return {
     baselineCreated: false,
+    baselineReset: false,
     baselineReportUnhealthy: false,
     configBaselineCreated: false,
     corruptedStateRecovered,
@@ -500,6 +541,7 @@ function getAlertTimeoutMs(): number {
   const parsed = raw ? Number.parseInt(raw, 10) : NaN;
   return Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_ALERT_TIMEOUT_MS;
 }
+
 async function confirmFix(): Promise<boolean> {
   if (!process.stdin.isTTY) {
     throw new Error('Fix mode requires --yes when stdin is not interactive');
@@ -564,19 +606,8 @@ async function writeHtmlReport(report: ScanReport): Promise<string> {
   return outputPath;
 }
 
-function getScanStatePath(): string {
-  const openclawHome = process.env.OPENCLAW_HOME || path.join(os.homedir(), '.openclaw');
-  return path.join(openclawHome, 'clawreins', 'scan-state.json');
-}
-
-function getConfigBaselinePath(): string {
-  const openclawHome = process.env.OPENCLAW_HOME || path.join(os.homedir(), '.openclaw');
-  return path.join(openclawHome, 'clawreins', 'config-base.json');
-}
-
 async function loadCurrentConfigSnapshot(): Promise<JsonValue> {
-  const openclawHome = process.env.OPENCLAW_HOME || path.join(os.homedir(), '.openclaw');
-  const openclawConfigPath = process.env.OPENCLAW_CONFIG || path.join(openclawHome, 'openclaw.json');
+  const openclawConfigPath = getOpenclawConfigPath();
 
   if (!(await fs.pathExists(openclawConfigPath))) {
     return {};
@@ -670,6 +701,7 @@ function diffJson(pathPrefix: string, previous: JsonValue, current: JsonValue, c
     diffJson(nextPath, previousRecord[key], currentRecord[key], changes);
   }
 }
+
 function openHtmlReport(reportPath: string): void {
   try {
     if (process.platform === 'darwin') {
@@ -702,6 +734,145 @@ function renderHtmlReportSummary(reportPath: string, autoOpenRequested: boolean)
   console.log(`  ${chalk.dim(`Open: ${toFileUrl(reportPath)}`)}`);
   if (autoOpenRequested) {
     console.log(`  ${chalk.dim('Auto-open: requested')}`);
+  }
+}
+
+function renderWatchtowerArtifactSummary(artifactPath: string): void {
+  console.log(chalk.bold('Watchtower Artifact:'));
+  console.log(`  ${chalk.dim(`Saved to: ${artifactPath}`)}`);
+}
+
+async function maybeUploadWatchtowerArtifact(
+  artifact: WatchtowerScanArtifact,
+  quiet: boolean
+): Promise<{ watchtowerConfigured: boolean }> {
+  let credentials = await resolveWatchtowerCredentials();
+
+  if (!credentials && !quiet) {
+    credentials = await maybeConnectWatchtowerInteractively(artifact);
+  }
+
+  if (!credentials) {
+    if (!quiet) {
+      console.log(chalk.bold('Watchtower Upload:'));
+      console.log(
+        `  ${chalk.dim('Upload skipped because Watchtower is not connected. Use CLAWREINS_WATCHTOWER_BASE_URL + CLAWREINS_WATCHTOWER_API_KEY for CI/CD and other headless environments.')}`
+      );
+    }
+    return {
+      watchtowerConfigured: false,
+    };
+  }
+
+  try {
+    buildWatchtowerApiUrl(credentials.baseUrl, '/api/scan-artifacts/ingest');
+  } catch (error) {
+    console.error(chalk.red(`Watchtower upload skipped. ${error instanceof Error ? error.message : String(error)}`));
+    return {
+      watchtowerConfigured: true,
+    };
+  }
+
+  try {
+    const { ingestUrl } = await uploadWatchtowerArtifact(credentials.baseUrl, credentials.apiKey, artifact);
+
+    if (!quiet) {
+      console.log(chalk.bold('Watchtower Upload:'));
+      console.log(`  ${chalk.green(`Uploaded to ${ingestUrl}.`)}`);
+    }
+  } catch (error) {
+    const message = error instanceof Error ? error.message : `Watchtower upload failed. ${String(error)}`;
+    console.error(chalk.red(message));
+    logger.warn(message, { baseUrl: credentials.baseUrl, source: credentials.source });
+  }
+
+  return {
+    watchtowerConfigured: true,
+  };
+}
+
+export async function enrollWatchtowerWithEmail(
+  email: string,
+  artifact: WatchtowerScanArtifact,
+  baseUrl = process.env.CLAWREINS_WATCHTOWER_BASE_URL?.trim() || DEFAULT_WATCHTOWER_BASE_URL
+): Promise<{ configPath: string | null; dashboardUrl: string; message?: string; status: 'created' | 'existing' }> {
+  const enrollment = await connectWatchtowerAccount(baseUrl, email, artifact);
+  let configPath: string | null = null;
+
+  if (enrollment.apiKey) {
+    configPath = await saveWatchtowerSettings({
+      apiKey: enrollment.apiKey,
+      baseUrl: enrollment.baseUrl,
+      dashboardUrl: enrollment.dashboardUrl,
+      email: enrollment.email,
+    });
+  }
+
+  return {
+    configPath,
+    dashboardUrl: enrollment.dashboardUrl,
+    message: enrollment.message,
+    status: enrollment.status,
+  };
+}
+
+async function maybeConnectWatchtowerInteractively(
+  artifact: WatchtowerScanArtifact
+): Promise<Awaited<ReturnType<typeof resolveWatchtowerCredentials>>> {
+  if (!process.stdin.isTTY || !process.stdout.isTTY) {
+    return null;
+  }
+
+  console.log(chalk.bold('Watchtower Setup:'));
+
+  const { shouldConnect } = await inquirer.prompt([
+    {
+      type: 'confirm',
+      name: 'shouldConnect',
+      message: 'Connect to Watchtower for continuous monitoring? (free)',
+      default: true,
+    },
+  ]);
+
+  if (!shouldConnect) {
+    console.log(`  ${chalk.dim('Skipped. You can connect later by setting Watchtower env vars or running scan interactively again.')}`);
+    return null;
+  }
+
+  const { email } = await inquirer.prompt([
+    {
+      type: 'input',
+      name: 'email',
+      message: 'Email',
+      validate: (value: string) =>
+        /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.trim()) ? true : 'Enter a valid email address.',
+    },
+  ]);
+
+  try {
+    const outcome = await enrollWatchtowerWithEmail(email.trim(), artifact);
+    console.log(`  ${chalk.dim(`Dashboard: ${outcome.dashboardUrl}`)}`);
+    console.log(`  ${chalk.dim('Check your email for your magic link.')}`);
+
+    if (outcome.status === 'created' && outcome.configPath) {
+      console.log(`  ${chalk.green('✅ Connected!')} ${chalk.dim(`API key saved to ${outcome.configPath}`)}`);
+      console.log(`  ${chalk.green('Next scan will upload automatically.')}`);
+      return await resolveWatchtowerCredentials();
+    }
+
+    if (outcome.message) {
+      console.log(`  ${chalk.yellow(outcome.message)}`);
+    } else {
+      console.log(`  ${chalk.yellow('Account already exists, and no new API key was issued.')}`);
+    }
+    console.log(`  ${chalk.yellow('Automatic upload will work once the original API key is available in ~/.openclaw/clawreins/config.json or via env vars.')}`);
+
+    return await resolveWatchtowerCredentials();
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.log(`  ${chalk.red(message)}`);
+    logger.warn('Watchtower interactive enrollment failed', { error });
+    return null;
   }
 }
 
@@ -808,4 +979,9 @@ function exitCodeFor(report: ScanReport): 0 | 1 | 2 {
     return 1;
   }
   return 2;
+}
+
+function renderScanCommand(): string {
+  const argv = process.argv.slice(2);
+  return argv.length > 0 ? `clawreins ${argv.join(' ')}` : 'clawreins scan';
 }

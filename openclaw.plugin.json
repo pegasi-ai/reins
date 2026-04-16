@@ -1,7 +1,7 @@
 {
   "id": "clawreins",
   "name": "ClawReins",
-  "description": "ClawReins is the intervention layer for OpenClaw.",
+  "description": "ClawReins is the runtime security layer for OpenClaw.",
   "version": "1.0.0",
   "main": "dist/plugin/index.js",
   "hooks": ["before_tool_call"],
