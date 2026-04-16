@@ -220,10 +220,10 @@ That makes scheduled monitoring usable from `cron`, `systemd`, CI, or any wrappe
 | `MCP_REMOTE_TRANSPORT_AUTH` | Critical/Warning | Remote MCP servers using HTTP or HTTPS without auth headers | No |
 | `INSTALLED_ARTIFACT_RISK` | Warning | Installed skills/plugins containing risky shell, network, or dynamic-code patterns | No |
 | `SKILL_PERMISSION_BOUNDARIES` | Warning | Installed skills/plugins requesting broad or wildcard capabilities | No |
-| `LOCAL_STATE_EXPOSURE` | Critical/Warning | Local agent state containing secrets or persistent prompt-injection instructions | No |
+| `LOCAL_STATE_EXPOSURE` | Critical | Local agent state containing plaintext secrets | No |
 | `SKILL_EXTERNAL_ORIGIN` | Critical/Warning | Installed skills/plugins sourced from mutable local paths or unpinned external origins | No |
 | `WORLD_WRITABLE_ARTIFACTS` | Critical/Warning | Installed skills/plugins or local state writable by group/other users | No |
-| `PERSISTENT_INSTRUCTION_OVERRIDES` | Critical/Warning | Persistent instructions that bypass approvals, hide actions, or weaken security policy | No |
+| `PLUGIN_DEPENDENCY_PINNING` | Warning | Plugin package dependencies that use ranges, wildcards, or mutable sources instead of exact versions | No |
 | `SENSITIVE_SCOPE_DECLARATIONS` | Critical/Warning | High-impact skill/plugin scopes without corresponding ASK/DENY policy coverage | No |
 
 Exit codes:

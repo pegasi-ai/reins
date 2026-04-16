@@ -118,10 +118,10 @@ const REMEDIATIONS = {
   mcpRemoteAuth: 'Use HTTPS and authorization headers for remote MCP servers outside localhost',
   installedArtifactRisk: 'Review or remove installed skills/plugins that contain risky shell, network, or dynamic-code patterns',
   skillPermissions: 'Constrain skill/plugin permissions to the minimum required capabilities and avoid wildcard access',
-  localStateExposure: 'Remove secrets and persistent prompt-injection instructions from local agent state',
+  localStateExposure: 'Remove plaintext secrets from local agent state',
   skillExternalOrigin: 'Pin installed skills/plugins to immutable package versions or commit SHAs from trusted origins',
   worldWritableArtifacts: 'Restrict installed skill/plugin and local state permissions so group/other users cannot modify them',
-  persistentInstructionOverrides: 'Remove persistent instructions that bypass approvals, hide actions, or weaken security policy',
+  pluginDependencyPinning: 'Pin plugin package dependencies to exact versions or immutable sources',
   sensitiveScopeDeclarations: 'Gate high-impact skill/plugin scopes with ASK or DENY policy rules before granting broad access',
 } as const;
 
@@ -188,10 +188,10 @@ const ARTIFACT_ENTRY_FILES = [
 ] as const;
 const RISKY_ARTIFACT_PATTERN =
   /(\b(curl|wget)\b[\s\S]{0,160}\|\s*(sh|bash)\b|\b(base64|openssl)\b[\s\S]{0,120}\|\s*(sh|bash|node|python)\b|Buffer\.from\([^)]*base64[^)]*\)|eval\s*\(|new Function\s*\(|child_process\.(exec|execSync)\s*\(|\bnc\s+.*\s-e\s|\bbash\s+-i\b|\/dev\/tcp\/|rm\s+-rf\s+(\/|~|\$HOME))/i;
-const PERSISTENT_OVERRIDE_STRONG_PATTERN =
-  /(disable\s+(clawreins|watchtower)|bypass\s+(approval|guardrail|policy)|always\s+allow|never\s+ask\s+(for\s+)?approval|auto-?approve)/i;
 const EXTERNAL_ORIGIN_PATTERN =
   /(github:[\w.-]+\/[\w.-]+(#(main|master|head))?|https?:\/\/(github\.com|raw\.githubusercontent\.com|gist\.github\.com)\/[^\s"'`]+((\/tree\/|\/archive\/|#)(main|master|head|latest)\b)?|"?version"?\s*[:=]\s*["']?(latest|\*)["']?|"?source"?\s*[:=]\s*["']?(file:|\/tmp\/|~\/Downloads|\/Users\/[^"']+\/Downloads|~\/Desktop|\/Users\/[^"']+\/Desktop)|"?path"?\s*[:=]\s*["']?(\/tmp\/|~\/Downloads|\/Users\/[^"']+\/Downloads|~\/Desktop|\/Users\/[^"']+\/Desktop))/i;
+const PINNED_PACKAGE_VERSION_PATTERN =
+  /^(\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?|npm:[^@]+@\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?|https:\/\/github\.com\/[\w.-]+\/[\w.-]+(?:\.git)?#[0-9a-f]{40}|github:[\w.-]+\/[\w.-]+#[0-9a-f]{40})$/i;
 const DECLARED_SCOPE_KEYS = ['permissions', 'scopes', 'capabilities', 'access'] as const;
 const WILDCARD_SCOPE_VALUES = new Set(['*', 'all', 'full-access', 'full_access', 'unrestricted']);
 const AUTH_HEADER_NAMES = new Set(['authorization', 'x-api-key', 'x-api-token']);
@@ -302,7 +302,7 @@ export class SecurityScanner {
       await this.checkLocalStateExposure(context),
       await this.checkSkillExternalOrigin(context),
       await this.checkWorldWritableArtifacts(context),
-      await this.checkPersistentInstructionOverrides(context),
+      await this.checkPluginDependencyPinning(context),
       await this.checkSensitiveScopeDeclarations(context),
     ];
   }
@@ -1028,22 +1028,21 @@ export class SecurityScanner {
     );
   }
 
-  private async checkPersistentInstructionOverrides(context: ScanContext): Promise<ScanCheck> {
-    const files = [...context.stateFiles, ...context.artifactFiles];
-    const strong = files.find((file) => Boolean(file.raw && PERSISTENT_OVERRIDE_STRONG_PATTERN.test(file.raw)));
-    if (strong) {
-      return this.fail(
-        'PERSISTENT_INSTRUCTION_OVERRIDES',
-        `persistent security-bypass instruction found in ${this.relativeHomePath(strong.path)}`,
-        REMEDIATIONS.persistentInstructionOverrides
+  private async checkPluginDependencyPinning(context: ScanContext): Promise<ScanCheck> {
+    const finding = this.findUnpinnedPluginDependency(context.artifactFiles);
+    if (finding) {
+      return this.warn(
+        'PLUGIN_DEPENDENCY_PINNING',
+        `plugin dependency ${finding.name}@${finding.version} is not pinned in ${this.relativeHomePath(finding.file.path)}`,
+        REMEDIATIONS.pluginDependencyPinning
       );
     }
 
     return this.pass(
-      'PERSISTENT_INSTRUCTION_OVERRIDES',
-      files.length > 0
-        ? 'persistent instructions do not contain explicit approval or policy bypass language'
-        : 'no persistent instruction files found'
+      'PLUGIN_DEPENDENCY_PINNING',
+      context.artifactFiles.length > 0
+        ? 'plugin package dependencies are pinned or not declared'
+        : 'no plugin package dependencies found'
     );
   }
 
@@ -1623,6 +1622,40 @@ export class SecurityScanner {
     }
 
     return null;
+  }
+
+  private findUnpinnedPluginDependency(
+    artifactFiles: ConfigSnapshot[]
+  ): { file: ConfigSnapshot; name: string; version: string } | null {
+    for (const file of artifactFiles) {
+      if (file.name !== 'package.json') {
+        continue;
+      }
+
+      const packageJson = this.asRecord(file.json);
+      if (!packageJson) {
+        continue;
+      }
+
+      for (const sectionName of ['dependencies', 'devDependencies', 'optionalDependencies']) {
+        const dependencies = this.asRecord(packageJson[sectionName]);
+        if (!dependencies) {
+          continue;
+        }
+
+        for (const [name, version] of Object.entries(dependencies)) {
+          if (typeof version !== 'string' || !this.isPinnedPackageVersion(version)) {
+            return { file, name, version: typeof version === 'string' ? version : '<non-string>' };
+          }
+        }
+      }
+    }
+
+    return null;
+  }
+
+  private isPinnedPackageVersion(value: string): boolean {
+    return PINNED_PACKAGE_VERSION_PATTERN.test(value.trim());
   }
 
   private requiredPolicyModulesForScopes(scopes: string[]): string[] {
