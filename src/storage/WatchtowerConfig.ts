@@ -12,6 +12,9 @@ export interface WatchtowerSettings {
   connectedAt?: string;
   dashboardUrl?: string;
   email?: string;
+  org_id?: string;
+  team_id?: string;
+  device_id?: string;
 }
 
 interface ClawreinsConfigFile {

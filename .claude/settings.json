@@ -1,0 +1,108 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node /Users/kevinwu/Documents/clawreins-public/clawreins/dist/hooks/pre-tool-use.js",
+            "_reins": true
+          }
+        ]
+      },
+      {
+        "matcher": "Edit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node /Users/kevinwu/Documents/clawreins-public/clawreins/dist/hooks/pre-tool-use.js",
+            "_reins": true
+          }
+        ]
+      },
+      {
+        "matcher": "MultiEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node /Users/kevinwu/Documents/clawreins-public/clawreins/dist/hooks/pre-tool-use.js",
+            "_reins": true
+          }
+        ]
+      },
+      {
+        "matcher": "Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node /Users/kevinwu/Documents/clawreins-public/clawreins/dist/hooks/pre-tool-use.js",
+            "_reins": true
+          }
+        ]
+      },
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node /Users/kevinwu/Documents/clawreins-public/clawreins/dist/hooks/pre-tool-use.js",
+            "_reins": true
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node /Users/kevinwu/Documents/clawreins-public/clawreins/dist/hooks/post-tool-use.js",
+            "_reins": true
+          }
+        ]
+      },
+      {
+        "matcher": "Edit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node /Users/kevinwu/Documents/clawreins-public/clawreins/dist/hooks/post-tool-use.js",
+            "_reins": true
+          }
+        ]
+      },
+      {
+        "matcher": "MultiEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node /Users/kevinwu/Documents/clawreins-public/clawreins/dist/hooks/post-tool-use.js",
+            "_reins": true
+          }
+        ]
+      },
+      {
+        "matcher": "Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node /Users/kevinwu/Documents/clawreins-public/clawreins/dist/hooks/post-tool-use.js",
+            "_reins": true
+          }
+        ]
+      },
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node /Users/kevinwu/Documents/clawreins-public/clawreins/dist/hooks/post-tool-use.js",
+            "_reins": true
+          }
+        ]
+      }
+    ]
+  }
+}

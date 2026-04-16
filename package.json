@@ -1,10 +1,11 @@
 {
-  "name": "clawreins",
-  "version": "0.0.21",
-  "description": "ClawReins is the runtime security layer for OpenClaw.",
+  "name": "@pegasi/reins",
+  "version": "0.0.23",
+  "description": "Reins — runtime security and policy enforcement for Claude Code, OpenClaw, and other AI agents.",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "bin": {
+    "reins": "./dist/cli/index.js",
     "clawreins": "./dist/cli/index.js"
   },
   "scripts": {
@@ -30,11 +31,10 @@
   "license": "Apache-2.0",
   "repository": {
     "type": "git",
-    "url": "https://github.com/pegasi-ai/clawreins.git"
+    "url": "https://github.com/pegasi-ai/reins.git"
   },
   "dependencies": {
     "chalk": "^4.1.2",
-    "clawreins": "^0.0.21",
     "commander": "^11.1.0",
     "fs-extra": "^11.2.0",
     "inquirer": "^9.2.12",

@@ -1,5 +1,5 @@
 /**
- * ClawReins Arbitrator
+ * Reins Arbitrator
  * The UI/Prompt Logic for Human-in-the-Loop Decisions
  *
  * Modes:
@@ -45,7 +45,7 @@ export class Arbitrator {
       {
         type: 'list',
         name: 'decision',
-        message: chalk.bold.yellow('⚠️  What should ClawReins do?'),
+        message: chalk.bold.yellow('⚠️  What should Reins do?'),
         choices: [
           {
             name: chalk.green('✓ Approve - Allow this action'),

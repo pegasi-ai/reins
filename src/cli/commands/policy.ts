@@ -1,5 +1,5 @@
 /**
- * ClawReins Policy Management Command
+ * Reins Policy Management Command
  */
 
 import inquirer from 'inquirer';
@@ -10,7 +10,7 @@ import { logger } from '../../core/Logger';
 export async function policyCommand(): Promise<void> {
   console.log('');
   console.log(chalk.bold.cyan('═'.repeat(80)));
-  console.log(chalk.bold.cyan('   🔒 ClawReins Policy Manager'));
+  console.log(chalk.bold.cyan('   🔒 Reins Policy Manager'));
   console.log(chalk.bold.cyan('═'.repeat(80)));
   console.log('');
 

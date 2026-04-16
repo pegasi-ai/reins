@@ -1,5 +1,5 @@
 /**
- * ClawReins Security Scan Command
+ * Reins Security Scan Command
  */
 
 import { spawn } from 'child_process';
@@ -521,7 +521,7 @@ function buildAlertSummary(comparison: DriftComparison, report: ScanReport): str
   const configChanges = comparison.configChanges.map((change) => `${change.kind.toUpperCase()}: ${change.path}`);
 
   const parts = [
-    `ClawReins drift detected.`,
+    `Reins drift detected.`,
     `Verdict: ${report.verdict}.`,
     `Score: ${report.score}/${report.total}.`,
   ];
@@ -561,7 +561,7 @@ async function confirmFix(): Promise<boolean> {
 
 function renderTerminalReport(report: ScanReport): void {
   console.log('');
-  console.log(chalk.bold.cyan('🦞 ClawReins Security Scan'));
+  console.log(chalk.bold.cyan('🦞 Reins Security Scan'));
   console.log(chalk.cyan('──────────────────────────────────────────'));
   renderChecksOnly(report);
 }
@@ -887,7 +887,7 @@ function buildHtmlReport(report: ScanReport): string {
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>ClawReins Security Scan</title>
+  <title>Reins Security Scan</title>
   <style>
     :root{color-scheme:dark}*{box-sizing:border-box}body{margin:0;padding:32px;background:#0d1117;color:#c9d1d9;font:16px/1.5 ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,"Liberation Mono","Courier New",system-ui,monospace}
     main{max-width:960px;margin:0 auto}.pass{color:#3fb950}.warn{color:#d29922}.fail{color:#f85149}.muted{color:#8b949e}
@@ -902,7 +902,7 @@ function buildHtmlReport(report: ScanReport): string {
     <section class="panel">
       <div class="header">
         <div>
-          <h1 style="margin:0 0 8px">ClawReins Security Scan</h1>
+          <h1 style="margin:0 0 8px">Reins Security Scan</h1>
           <div class="muted">Scanned at ${escapeHtml(report.timestamp)}</div>
         </div>
         <span class="badge ${verdictClass}">${escapeHtml(report.verdict)}</span>
@@ -912,7 +912,7 @@ function buildHtmlReport(report: ScanReport): string {
       <div class="checks">
 ${checks}
       </div>
-      <footer>Secured by <a href="https://github.com/pegasi-ai/clawreins">ClawReins</a></footer>
+      <footer>Secured by <a href="https://github.com/pegasi-ai/clawreins">Reins</a></footer>
     </section>
   </main>
 </body>

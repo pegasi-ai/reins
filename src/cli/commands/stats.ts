@@ -1,5 +1,5 @@
 /**
- * ClawReins Stats Command
+ * Reins Stats Command
  */
 
 import chalk from 'chalk';
@@ -9,7 +9,7 @@ import { logger } from '../../core/Logger';
 export async function statsCommand(): Promise<void> {
   console.log('');
   console.log(chalk.bold.cyan('═'.repeat(80)));
-  console.log(chalk.bold.cyan('   📊 ClawReins Statistics'));
+  console.log(chalk.bold.cyan('   📊 Reins Statistics'));
   console.log(chalk.bold.cyan('═'.repeat(80)));
   console.log('');
 

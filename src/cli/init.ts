@@ -1,6 +1,6 @@
 /**
- * ClawReins Init/Configure Wizard
- * Interactive setup for ClawReins with OpenClaw + automation-friendly mode
+ * Reins Init/Configure Wizard
+ * Interactive setup for Reins with OpenClaw + automation-friendly mode
  */
 
 import inquirer from 'inquirer';
@@ -21,7 +21,9 @@ import { getProtectedModules } from '../plugin/tool-interceptor';
 import { syncToolShieldDefaults } from '../toolshield/sync';
 import { runSetupScan } from './scan';
 import { installWatchtowerSchedule, supportsScheduledScans } from './scheduler';
-import { resolveWatchtowerCredentials } from '../storage/WatchtowerConfig';
+import { resolveWatchtowerCredentials, saveWatchtowerSettings } from '../storage/WatchtowerConfig';
+import { validateApiKey, fetchPolicies, fetchShellPolicies } from '../lib/watchtower-client';
+import { installClaudeCodeHooks } from '../lib/hook-installer';
 
 type SecurityLevel = 'permissive' | 'balanced' | 'strict' | 'custom';
 
@@ -269,8 +271,8 @@ export async function initWizard(options: InitWizardOptions = {}): Promise<InitS
   if (!jsonMode) {
     console.log('');
     console.log(chalk.bold.cyan('═'.repeat(80)));
-    console.log(chalk.bold.cyan('   🦞 + 🪢 ClawReins Setup Wizard'));
-    console.log(chalk.bold.cyan('   ClawReins is the runtime security layer for OpenClaw..'));
+    console.log(chalk.bold.cyan('   🪢 Reins Setup Wizard'));
+    console.log(chalk.bold.cyan('   Runtime security and policy enforcement for Claude Code.'));
     console.log(chalk.bold.cyan('═'.repeat(80)));
     console.log('');
   }
@@ -299,7 +301,7 @@ export async function initWizard(options: InitWizardOptions = {}): Promise<InitS
       {
         type: 'confirm',
         name: 'shouldReconfigure',
-        message: 'ClawReins is already configured. Reconfigure?',
+        message: 'Reins is already configured. Reconfigure?',
         default: false,
       },
     ]);
@@ -402,7 +404,7 @@ export async function initWizard(options: InitWizardOptions = {}): Promise<InitS
       {
         type: 'checkbox',
         name: 'selectedModules',
-        message: 'Which tool modules should ClawReins intercept?',
+        message: 'Which tool modules should Reins intercept?',
         choices: availableModules.map((mod) => ({
           name: mod,
           value: mod,
@@ -446,7 +448,7 @@ export async function initWizard(options: InitWizardOptions = {}): Promise<InitS
   await registerPlugin(policy.defaultAction);
 
   if (!jsonMode) {
-    console.log(chalk.green('✅ ClawReins registered in OpenClaw config'));
+    console.log(chalk.green('✅ Reins registered in OpenClaw config'));
     console.log('');
   }
 
@@ -484,9 +486,87 @@ export async function initWizard(options: InitWizardOptions = {}): Promise<InitS
     }
   }
 
+  // Step 7: Watchtower API key + Claude Code hooks (interactive only)
+  if (!nonInteractive) {
+    const { connectWatchtower } = await inquirer.prompt([{
+      type: 'confirm',
+      name: 'connectWatchtower',
+      message: '📡 Connect to Watchtower for centralized policy governance?',
+      default: false,
+    }]);
+
+    if (connectWatchtower) {
+      const { apiKey } = await inquirer.prompt([{
+        type: 'password',
+        name: 'apiKey',
+        message: 'Watchtower API key (wt_...):',
+        validate: (v: string) => v.trim().length > 0 || 'API key is required',
+      }]);
+
+      const { baseUrl } = await inquirer.prompt([{
+        type: 'input',
+        name: 'baseUrl',
+        message: 'Watchtower URL:',
+        default: 'https://app.pegasi.ai',
+      }]);
+
+      try {
+        const result = await validateApiKey(apiKey as string, baseUrl as string);
+        await saveWatchtowerSettings({
+          apiKey: apiKey as string,
+          baseUrl: baseUrl as string,
+          email: result.email,
+          org_id: result.org_id,
+          team_id: result.team_id,
+          device_id: result.device_id,
+          connectedAt: new Date().toISOString(),
+        });
+
+        // Pull initial policies
+        const bundle = await fetchPolicies(apiKey as string, baseUrl as string);
+        const policiesPath = path.join(CLAWREINS_DATA_DIR, 'policies.json');
+        await fs.writeJson(policiesPath, bundle, { spaces: 2 });
+
+        // Merge shell policies
+        const shellRules = await fetchShellPolicies(apiKey as string, baseUrl as string);
+        if (shellRules.length > 0) {
+          bundle.shell_rules = [...bundle.shell_rules, ...shellRules];
+          await fs.writeJson(policiesPath, bundle, { spaces: 2 });
+        }
+
+        console.log(chalk.green(`✅ Connected to Watchtower (${result.email}, org: ${result.org_id})`));
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        warnings.push(`Watchtower connection failed: ${msg}`);
+        console.log(chalk.yellow(`⚠️  Watchtower connection failed: ${msg}`));
+      }
+    }
+
+    // Install Claude Code hooks
+    if (!jsonMode) {
+      console.log(chalk.bold('Step 7b: Installing Claude Code hooks...'));
+    }
+    try {
+      const hookResult = await installClaudeCodeHooks();
+      if (!jsonMode) {
+        if (hookResult.alreadyInstalled) {
+          console.log(chalk.green('✅ Claude Code hooks already installed'));
+        } else {
+          console.log(chalk.green(`✅ Claude Code hooks installed at ${hookResult.path}`));
+        }
+      }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      warnings.push(`Claude Code hook installation failed: ${msg}`);
+      if (!jsonMode) {
+        console.log(chalk.yellow(`⚠️  Hook installation failed: ${msg}`));
+      }
+    }
+  }
+
   if (!nonInteractive && !jsonMode) {
     console.log('');
-    console.log(chalk.bold('Step 7: Running first security scan...'));
+    console.log(chalk.bold('Step 8: Running first security scan...'));
     console.log('');
 
     try {
@@ -510,7 +590,7 @@ export async function initWizard(options: InitWizardOptions = {}): Promise<InitS
   if (!jsonMode) {
     console.log('');
     console.log(chalk.bold.green('═'.repeat(80)));
-    console.log(chalk.bold.green('   ✅ ClawReins installed successfully!'));
+    console.log(chalk.bold.green('   ✅ Reins installed successfully!'));
     console.log(chalk.bold.green('═'.repeat(80)));
     console.log('');
 

@@ -1,5 +1,5 @@
 /**
- * ClawReins Interceptor
+ * Reins Interceptor
  * The Brain - Runtime Security Evaluation Engine
  */
 
@@ -177,14 +177,14 @@ export class Interceptor {
         );
 
         throw new Error(
-          `[ClawReins:APPROVAL_REQUIRED] ${moduleName}.${methodName}() is blocked pending human approval. ` +
+          `[Reins:APPROVAL_REQUIRED] ${moduleName}.${methodName}() is blocked pending human approval. ` +
             `Risk: ${detail}\n` +
             instructions
         );
       }
 
       throw new Error(
-        `ClawReins Security Violation: ${moduleName}.${methodName}() was DENIED. ${detail}`
+        `Reins Security Violation: ${moduleName}.${methodName}() was DENIED. ${detail}`
       );
     }
   }
@@ -399,6 +399,6 @@ export class Interceptor {
           ? chalk.red(action)
           : chalk.yellow(action);
 
-    logger.info(`${chalk.cyan('ClawReins:')} ${moduleName}.${methodName}() → ${coloredAction}`);
+    logger.info(`${chalk.cyan('Reins:')} ${moduleName}.${methodName}() → ${coloredAction}`);
   }
 }
