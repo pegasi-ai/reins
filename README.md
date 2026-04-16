@@ -71,7 +71,7 @@ ClawReins includes a security scanner that audits the local OpenClaw environment
 Usage:
 
 ```bash
-# Run the 13-check audit and save the HTML report
+# Run the 25-check audit and save the HTML report
 clawreins scan
 
 # Save the report and try to open it automatically
@@ -213,6 +213,18 @@ That makes scheduled monitoring usable from `cron`, `systemd`, CI, or any wrappe
 | `NODEJS_VERSION` | Critical | Node.js versions affected by CVE-2026-21636 permission-model bypass window | No |
 | `CONTROL_UI_AUTH` | Critical | Control UI authentication bypass flags enabled | Yes |
 | `BROWSER_UNSANDBOXED` | Critical | Browser skill config missing `headless: true` or `sandbox: true` protection | No |
+| `CHANNEL_DM_POLICY` | Critical | Telegram, WhatsApp, or Discord DMs open to all or wildcard senders | No |
+| `MCP_ENABLE_ALL_SERVERS` | Critical | Project MCP servers automatically trusted without individual approval | No |
+| `MCP_FILESYSTEM_ROOTS` | Warning | Filesystem MCP servers exposing broad or sensitive roots | No |
+| `MCP_SERVER_PINNING` | Warning | MCP server commands using unpinned packages or shell-piped remote installers | No |
+| `MCP_REMOTE_TRANSPORT_AUTH` | Critical/Warning | Remote MCP servers using HTTP or HTTPS without auth headers | No |
+| `INSTALLED_ARTIFACT_RISK` | Warning | Installed skills/plugins containing risky shell, network, or dynamic-code patterns | No |
+| `SKILL_PERMISSION_BOUNDARIES` | Warning | Installed skills/plugins requesting broad or wildcard capabilities | No |
+| `LOCAL_STATE_EXPOSURE` | Critical/Warning | Local agent state containing secrets or persistent prompt-injection instructions | No |
+| `SKILL_EXTERNAL_ORIGIN` | Critical/Warning | Installed skills/plugins sourced from mutable local paths or unpinned external origins | No |
+| `WORLD_WRITABLE_ARTIFACTS` | Critical/Warning | Installed skills/plugins or local state writable by group/other users | No |
+| `PERSISTENT_INSTRUCTION_OVERRIDES` | Critical/Warning | Persistent instructions that bypass approvals, hide actions, or weaken security policy | No |
+| `SENSITIVE_SCOPE_DECLARATIONS` | Critical/Warning | High-impact skill/plugin scopes without corresponding ASK/DENY policy coverage | No |
 
 Exit codes:
 - `0` = `SECURE`
@@ -442,7 +454,7 @@ clawreins enable      # Re-enable
 clawreins toolshield-sync  # Sync ToolShield guardrails into AGENTS.md
 clawreins upgrade     # Reinstall latest clawreins@beta in OpenClaw + restart gateway
 clawreins update      # Alias for upgrade
-clawreins scan        # Run 13 security checks and save an HTML report
+clawreins scan        # Run 25 security checks and save an HTML report
 clawreins scan --fix  # Backup config and apply supported remediations
 clawreins scan --monitor  # Compare with the last baseline and alert on drift
 clawreins scan --monitor --reset-baseline  # Accept the current config as the new monitor baseline
