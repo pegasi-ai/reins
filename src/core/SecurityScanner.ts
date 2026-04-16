@@ -46,6 +46,8 @@ interface ConfigSnapshot {
 
 interface ScanContext {
   configFiles: ConfigSnapshot[];
+  artifactFiles: ConfigSnapshot[];
+  stateFiles: ConfigSnapshot[];
   openclawConfig: ConfigSnapshot;
   policyConfig: ConfigSnapshot;
   inDocker: boolean;
@@ -109,6 +111,18 @@ const REMEDIATIONS = {
   nodeVersion: 'Upgrade Node.js to a version not affected by CVE-2026-21636',
   controlUiAuth: 'Disable auth bypass flags and require authentication for the Control UI',
   browser: 'Set headless: true in your browser skill config to reduce DOM prompt-injection risk',
+  channelDmPolicy: 'Restrict Telegram/WhatsApp DMs with dmPolicy "allowlist" and explicit allowFrom entries',
+  mcpEnableAll: 'Disable automatic trust of all project MCP servers; approve MCP servers individually',
+  mcpFilesystemRoots: 'Limit filesystem MCP roots to narrow project directories and exclude home/system secrets',
+  mcpServerPinning: 'Pin MCP server packages to exact versions and avoid shell-piped remote installers',
+  mcpRemoteAuth: 'Use HTTPS and authorization headers for remote MCP servers outside localhost',
+  installedArtifactRisk: 'Review or remove installed skills/plugins that contain risky shell, network, or dynamic-code patterns',
+  skillPermissions: 'Constrain skill/plugin permissions to the minimum required capabilities and avoid wildcard access',
+  localStateExposure: 'Remove plaintext secrets from local agent state',
+  skillExternalOrigin: 'Pin installed skills/plugins to immutable package versions or commit SHAs from trusted origins',
+  worldWritableArtifacts: 'Restrict installed skill/plugin and local state permissions so group/other users cannot modify them',
+  pluginDependencyPinning: 'Pin plugin package dependencies to exact versions or immutable sources',
+  sensitiveScopeDeclarations: 'Gate high-impact skill/plugin scopes with ASK or DENY policy rules before granting broad access',
 } as const;
 
 const KEY_VALUE_PATTERNS = (key: string): RegExp[] => [
@@ -143,6 +157,50 @@ const RATE_LIMIT_PATTERN = /(rateLimit|rate_limit|throttle|maxRequests)/i;
 const CONTROL_UI_BYPASS_PATTERN =
   /"?(authBypass|auth_bypass|skipAuth|noAuth|disableAuth)"?\s*[:=]\s*(true|yes|1)/i;
 const BROWSER_CONTEXT_PATTERN = /browser/i;
+const MCP_ENABLE_ALL_PATTERN = /"?enableAllProjectMcpServers"?\s*[:=]\s*(true|yes|1)/i;
+const RISKY_MCP_INSTALL_PATTERN =
+  /(\b(curl|wget)\b[\s\S]{0,160}\|\s*(sh|bash)\b|\b(npx|uvx)\s+(?!-[\w-]+\s+)(@?[\w.-]+(?:\/[\w.-]+)?)(?!@[\w.-])|\b(pip|pip3)\s+install\s+(?!-[\w-]+\s+)([\w.-]+)(?!==|~=|>=|<=|@)|\blatest\b|github:[\w.-]+\/[\w.-]+#[\w./-]+)/i;
+const ARTIFACT_SCAN_EXTENSIONS = new Set([
+  '.cjs',
+  '.env',
+  '.js',
+  '.json',
+  '.md',
+  '.mjs',
+  '.py',
+  '.sh',
+  '.toml',
+  '.ts',
+  '.txt',
+  '.yaml',
+  '.yml',
+]);
+const ARTIFACT_ENTRY_FILES = [
+  'openclaw.plugin.json',
+  'package.json',
+  'plugin.json',
+  'manifest.json',
+  'skill.json',
+  'install.sh',
+  'postinstall.sh',
+  'index.js',
+  'index.ts',
+] as const;
+const RISKY_ARTIFACT_PATTERN =
+  /(\b(curl|wget)\b[\s\S]{0,160}\|\s*(sh|bash)\b|\b(base64|openssl)\b[\s\S]{0,120}\|\s*(sh|bash|node|python)\b|Buffer\.from\([^)]*base64[^)]*\)|eval\s*\(|new Function\s*\(|child_process\.(exec|execSync)\s*\(|\bnc\s+.*\s-e\s|\bbash\s+-i\b|\/dev\/tcp\/|rm\s+-rf\s+(\/|~|\$HOME))/i;
+const EXTERNAL_ORIGIN_PATTERN =
+  /(github:[\w.-]+\/[\w.-]+(#(main|master|head))?|https?:\/\/(github\.com|raw\.githubusercontent\.com|gist\.github\.com)\/[^\s"'`]+((\/tree\/|\/archive\/|#)(main|master|head|latest)\b)?|"?version"?\s*[:=]\s*["']?(latest|\*)["']?|"?source"?\s*[:=]\s*["']?(file:|\/tmp\/|~\/Downloads|\/Users\/[^"']+\/Downloads|~\/Desktop|\/Users\/[^"']+\/Desktop)|"?path"?\s*[:=]\s*["']?(\/tmp\/|~\/Downloads|\/Users\/[^"']+\/Downloads|~\/Desktop|\/Users\/[^"']+\/Desktop))/i;
+const PINNED_PACKAGE_VERSION_PATTERN =
+  /^(\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?|npm:[^@]+@\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?|https:\/\/github\.com\/[\w.-]+\/[\w.-]+(?:\.git)?#[0-9a-f]{40}|github:[\w.-]+\/[\w.-]+#[0-9a-f]{40})$/i;
+const DECLARED_SCOPE_KEYS = ['permissions', 'scopes', 'capabilities', 'access'] as const;
+const WILDCARD_SCOPE_VALUES = new Set(['*', 'all', 'full-access', 'full_access', 'unrestricted']);
+const AUTH_HEADER_NAMES = new Set(['authorization', 'x-api-key', 'x-api-token']);
+const SCOPE_TO_POLICY_MODULES: Array<{ values: string[]; modules: string[] }> = [
+  { values: ['filesystem', 'file-system', 'files', 'file'], modules: ['FileSystem'] },
+  { values: ['shell', 'exec', 'terminal'], modules: ['Shell'] },
+  { values: ['browser'], modules: ['Browser'] },
+  { values: ['email', 'gmail', 'calendar', 'drive', 'slack', 'notion', 'payments', 'payment', 'bank', 'aws', 'ssh', 'credentials'], modules: ['Network', 'Gateway'] },
+];
 
 export class SecurityScanner {
   private readonly userHome: string;
@@ -234,15 +292,33 @@ export class SecurityScanner {
       await this.checkNodeVersion(context),
       await this.checkControlUiAuth(context),
       await this.checkBrowserUnsandboxed(context),
+      await this.checkChannelDmPolicy(context),
+      await this.checkMcpEnableAllServers(context),
+      await this.checkMcpFilesystemRoots(context),
+      await this.checkMcpServerPinning(context),
+      await this.checkMcpRemoteTransportAuth(context),
+      await this.checkInstalledArtifactRisk(context),
+      await this.checkSkillPermissionBoundaries(context),
+      await this.checkLocalStateExposure(context),
+      await this.checkSkillExternalOrigin(context),
+      await this.checkWorldWritableArtifacts(context),
+      await this.checkPluginDependencyPinning(context),
+      await this.checkSensitiveScopeDeclarations(context),
     ];
   }
 
   private async loadContext(): Promise<ScanContext> {
     const configPaths = await this.discoverConfigPaths();
+    const artifactPaths = await this.discoverArtifactPaths();
+    const statePaths = await this.discoverStatePaths();
     const configFiles = await Promise.all(configPaths.map((filePath) => this.readConfig(filePath)));
+    const artifactFiles = await Promise.all(artifactPaths.map((filePath) => this.readConfig(filePath)));
+    const stateFiles = await Promise.all(statePaths.map((filePath) => this.readConfig(filePath)));
 
     return {
       configFiles,
+      artifactFiles,
+      stateFiles,
       openclawConfig: await this.readConfig(this.openclawConfigPath),
       policyConfig: await this.readConfig(this.policyPath),
       inDocker: await this.detectDocker(),
@@ -314,6 +390,121 @@ export class SecurityScanner {
     }
 
     return Array.from(deduped).sort();
+  }
+
+  private async discoverArtifactPaths(): Promise<string[]> {
+    const deduped = new Set<string>();
+    await this.addArtifactEntryFiles(path.join(this.openclawHome, 'extensions'), deduped);
+
+    const configuredPaths = await this.readConfiguredPluginPaths();
+    for (const configuredPath of configuredPaths) {
+      await this.addArtifactEntryFiles(configuredPath, deduped);
+    }
+
+    return Array.from(deduped).sort();
+  }
+
+  private async discoverStatePaths(): Promise<string[]> {
+    const candidates = [
+      path.join(this.openclawHome, 'workspace', 'AGENTS.md'),
+      path.join(this.userHome, '.claude', 'CLAUDE.md'),
+    ];
+    const deduped = new Set<string>();
+
+    for (const filePath of candidates) {
+      await this.addExistingReadableFile(filePath, deduped);
+    }
+
+    return Array.from(deduped).sort();
+  }
+
+  private async readConfiguredPluginPaths(): Promise<string[]> {
+    const config = await this.readConfig(this.openclawConfigPath);
+    const entries = this.collectPluginEntries(config.json);
+    const pluginPaths = new Set<string>();
+
+    for (const entry of entries) {
+      for (const key of ['path', 'dir', 'directory', 'pluginDir']) {
+        const value = entry.config[key];
+        if (typeof value === 'string') {
+          pluginPaths.add(path.resolve(this.openclawHome, expandHome(value, this.userHome)));
+        }
+      }
+    }
+
+    return Array.from(pluginPaths).sort();
+  }
+
+  private async addArtifactEntryFiles(directory: string, found: Set<string>): Promise<void> {
+    if (!(await fs.pathExists(directory))) {
+      return;
+    }
+
+    let stats;
+    try {
+      stats = await fs.stat(directory);
+    } catch {
+      return;
+    }
+
+    if (stats.isFile()) {
+      await this.addExistingReadableFile(directory, found);
+      return;
+    }
+
+    if (!stats.isDirectory()) {
+      return;
+    }
+
+    let entries: string[];
+    try {
+      entries = await fs.readdir(directory);
+    } catch {
+      return;
+    }
+
+    for (const fileName of ARTIFACT_ENTRY_FILES) {
+      await this.addExistingReadableFile(path.join(directory, fileName), found);
+    }
+
+    for (const entry of entries.sort().slice(0, 200)) {
+      const childPath = path.join(directory, entry);
+      let childStats;
+      try {
+        childStats = await fs.stat(childPath);
+      } catch {
+        continue;
+      }
+
+      if (!childStats.isDirectory()) {
+        continue;
+      }
+
+      for (const fileName of ARTIFACT_ENTRY_FILES) {
+        await this.addExistingReadableFile(path.join(childPath, fileName), found);
+      }
+    }
+  }
+
+  private async addExistingReadableFile(filePath: string, found: Set<string>): Promise<void> {
+    if (!(await fs.pathExists(filePath))) {
+      return;
+    }
+
+    try {
+      const stats = await fs.stat(filePath);
+      if (!stats.isFile() || stats.size > 256_000 || !ARTIFACT_SCAN_EXTENSIONS.has(path.extname(filePath).toLowerCase())) {
+        return;
+      }
+
+      try {
+        found.add(await fs.realpath(filePath));
+      } catch {
+        found.add(filePath);
+      }
+    } catch {
+      // Best-effort discovery only.
+    }
   }
 
   private async readConfig(filePath: string): Promise<ConfigSnapshot> {
@@ -630,6 +821,257 @@ export class SecurityScanner {
     return this.fail('BROWSER_UNSANDBOXED', 'browser is not sandboxed', REMEDIATIONS.browser);
   }
 
+  private async checkChannelDmPolicy(context: ScanContext): Promise<ScanCheck> {
+    const finding = this.findOpenChannelDmPolicy(context.openclawConfig.json);
+    if (finding) {
+      return this.fail(
+        'CHANNEL_DM_POLICY',
+        `${finding.channel} DMs are open to ${finding.reason}`,
+        REMEDIATIONS.channelDmPolicy
+      );
+    }
+
+    if (this.hasConfigPattern(context, /dmPolicy\s*[:=]\s*["']?open["']?/i)) {
+      return this.fail(
+        'CHANNEL_DM_POLICY',
+        'channel dmPolicy is open',
+        REMEDIATIONS.channelDmPolicy
+      );
+    }
+
+    return this.pass('CHANNEL_DM_POLICY', 'channel DMs are restricted or not configured');
+  }
+
+  private async checkMcpEnableAllServers(context: ScanContext): Promise<ScanCheck> {
+    const affected = context.configFiles.find((file) => Boolean(file.raw && MCP_ENABLE_ALL_PATTERN.test(file.raw)));
+    if (affected) {
+      return this.fail(
+        'MCP_ENABLE_ALL_SERVERS',
+        `automatic trust for project MCP servers enabled in ${affected.name}`,
+        REMEDIATIONS.mcpEnableAll
+      );
+    }
+
+    return this.pass('MCP_ENABLE_ALL_SERVERS', 'project MCP servers are not automatically trusted');
+  }
+
+  private async checkMcpFilesystemRoots(context: ScanContext): Promise<ScanCheck> {
+    const riskyRoot = this.findRiskyMcpFilesystemRoot(context.openclawConfig.json);
+    if (riskyRoot) {
+      return this.warn(
+        'MCP_FILESYSTEM_ROOTS',
+        `filesystem MCP server exposes broad root ${riskyRoot}`,
+        REMEDIATIONS.mcpFilesystemRoots
+      );
+    }
+
+    if (this.hasConfigPattern(context, /(mcp|filesystem)[\s\S]{0,300}(["']?(~|\$HOME|\.ssh|\.aws|\.gnupg|Downloads)["']?)/i)) {
+      return this.warn(
+        'MCP_FILESYSTEM_ROOTS',
+        'filesystem MCP server may expose broad or sensitive paths',
+        REMEDIATIONS.mcpFilesystemRoots
+      );
+    }
+
+    return this.pass('MCP_FILESYSTEM_ROOTS', 'filesystem MCP roots are narrow or not configured');
+  }
+
+  private async checkMcpServerPinning(context: ScanContext): Promise<ScanCheck> {
+    const riskyServer = this.findRiskyMcpServerPinning(context.openclawConfig.json);
+    if (riskyServer) {
+      return this.warn(
+        'MCP_SERVER_PINNING',
+        `unpinned or shell-installed MCP server dependency found in ${riskyServer}`,
+        REMEDIATIONS.mcpServerPinning
+      );
+    }
+
+    const affected = context.configFiles.find((file) => Boolean(file.raw && RISKY_MCP_INSTALL_PATTERN.test(file.raw)));
+    if (affected) {
+      return this.warn(
+        'MCP_SERVER_PINNING',
+        `unpinned or shell-installed MCP server dependency found in ${affected.name}`,
+        REMEDIATIONS.mcpServerPinning
+      );
+    }
+
+    return this.pass('MCP_SERVER_PINNING', 'MCP server commands appear pinned');
+  }
+
+  private async checkMcpRemoteTransportAuth(context: ScanContext): Promise<ScanCheck> {
+    const finding = this.findMcpRemoteWithoutAuth(context.openclawConfig.json);
+    if (finding) {
+      const status = finding.url.startsWith('http://') ? 'FAIL' : 'WARN';
+      return {
+        id: 'MCP_REMOTE_TRANSPORT_AUTH',
+        status,
+        message: `remote MCP server ${finding.name} uses ${finding.reason}`,
+        remediation: REMEDIATIONS.mcpRemoteAuth,
+      };
+    }
+
+    if (this.hasConfigPattern(context, /\bmcp\b[\s\S]{0,300}\burl\s*[:=]\s*["']http:\/\/(?!localhost|127\.0\.0\.1|\[::1\])/i)) {
+      return this.fail(
+        'MCP_REMOTE_TRANSPORT_AUTH',
+        'remote MCP server uses HTTP outside localhost',
+        REMEDIATIONS.mcpRemoteAuth
+      );
+    }
+
+    return this.pass('MCP_REMOTE_TRANSPORT_AUTH', 'remote MCP servers use localhost or authenticated HTTPS');
+  }
+
+  private async checkInstalledArtifactRisk(context: ScanContext): Promise<ScanCheck> {
+    const affected = context.artifactFiles.find((file) => Boolean(file.raw && RISKY_ARTIFACT_PATTERN.test(file.raw)));
+    if (affected) {
+      return this.warn(
+        'INSTALLED_ARTIFACT_RISK',
+        `installed skill/plugin contains risky execution pattern in ${this.relativeHomePath(affected.path)}`,
+        REMEDIATIONS.installedArtifactRisk
+      );
+    }
+
+    return this.pass(
+      'INSTALLED_ARTIFACT_RISK',
+      context.artifactFiles.length > 0
+        ? 'installed skills/plugins do not contain known risky execution patterns'
+        : 'no installed skill/plugin artifacts found'
+    );
+  }
+
+  private async checkSkillPermissionBoundaries(context: ScanContext): Promise<ScanCheck> {
+    const affected = context.artifactFiles.find((file) => this.hasBroadDeclaredArtifactPermission(file));
+    if (affected) {
+      return this.warn(
+        'SKILL_PERMISSION_BOUNDARIES',
+        `installed skill/plugin declares wildcard or unrestricted capabilities in ${this.relativeHomePath(affected.path)}`,
+        REMEDIATIONS.skillPermissions
+      );
+    }
+
+    return this.pass(
+      'SKILL_PERMISSION_BOUNDARIES',
+      context.artifactFiles.length > 0
+        ? 'installed skill/plugin manifest permissions are scoped or not declared'
+        : 'no installed skill/plugin manifest permissions found'
+    );
+  }
+
+  private async checkLocalStateExposure(context: ScanContext): Promise<ScanCheck> {
+    const secret = context.stateFiles.find((file) =>
+      Boolean(file.raw && API_KEY_PATTERNS.some((pattern) => pattern.test(file.raw || '')))
+    );
+    if (secret) {
+      return this.fail(
+        'LOCAL_STATE_EXPOSURE',
+        `plaintext secret found in local agent state ${this.relativeHomePath(secret.path)}`,
+        REMEDIATIONS.localStateExposure
+      );
+    }
+
+    return this.pass(
+      'LOCAL_STATE_EXPOSURE',
+      context.stateFiles.length > 0
+        ? 'local agent state does not contain known plaintext secret patterns'
+        : 'no local agent state files found'
+    );
+  }
+
+  private async checkSkillExternalOrigin(context: ScanContext): Promise<ScanCheck> {
+    const finding = this.findRiskyExternalOrigin(context);
+    if (finding) {
+      const status = finding.reason === 'mutable local path' ? 'FAIL' : 'WARN';
+      return {
+        id: 'SKILL_EXTERNAL_ORIGIN',
+        status,
+        message: `${finding.reason} found in ${this.relativeHomePath(finding.file.path)}`,
+        remediation: REMEDIATIONS.skillExternalOrigin,
+      };
+    }
+
+    return this.pass(
+      'SKILL_EXTERNAL_ORIGIN',
+      context.artifactFiles.length > 0
+        ? 'installed skill/plugin origins appear pinned or local-only'
+        : 'no installed skill/plugin origins found'
+    );
+  }
+
+  private async checkWorldWritableArtifacts(context: ScanContext): Promise<ScanCheck> {
+    const files = [...context.artifactFiles, ...context.stateFiles];
+    const writable = files.find((file) => file.exists && typeof file.mode === 'number' && (file.mode & 0o022) !== 0);
+    if (writable) {
+      const status = context.artifactFiles.some((file) => file.path === writable.path) ? 'FAIL' : 'WARN';
+      return {
+        id: 'WORLD_WRITABLE_ARTIFACTS',
+        status,
+        message: `loose permissions on ${this.relativeHomePath(writable.path)} (${formatMode(writable.mode)})`,
+        remediation: REMEDIATIONS.worldWritableArtifacts,
+      };
+    }
+
+    const writableDirectory = await this.findWritableArtifactDirectory(files);
+    if (writableDirectory) {
+      return {
+        id: 'WORLD_WRITABLE_ARTIFACTS',
+        status: writableDirectory.isArtifact ? 'FAIL' : 'WARN',
+        message: `loose permissions on ${this.relativeHomePath(writableDirectory.path)} (${formatMode(writableDirectory.mode)})`,
+        remediation: REMEDIATIONS.worldWritableArtifacts,
+      };
+    }
+
+    return this.pass(
+      'WORLD_WRITABLE_ARTIFACTS',
+      files.length > 0
+        ? 'installed skill/plugin and local state permissions are restricted'
+        : 'no installed skill/plugin or local state files found'
+    );
+  }
+
+  private async checkPluginDependencyPinning(context: ScanContext): Promise<ScanCheck> {
+    const finding = this.findUnpinnedPluginDependency(context.artifactFiles);
+    if (finding) {
+      return this.warn(
+        'PLUGIN_DEPENDENCY_PINNING',
+        `plugin dependency ${finding.name}@${finding.version} is not pinned in ${this.relativeHomePath(finding.file.path)}`,
+        REMEDIATIONS.pluginDependencyPinning
+      );
+    }
+
+    return this.pass(
+      'PLUGIN_DEPENDENCY_PINNING',
+      context.artifactFiles.length > 0
+        ? 'plugin package dependencies are pinned or not declared'
+        : 'no plugin package dependencies found'
+    );
+  }
+
+  private async checkSensitiveScopeDeclarations(context: ScanContext): Promise<ScanCheck> {
+    const finding = this.findSensitiveScopeDeclaration(context);
+    if (!finding) {
+      return this.pass(
+        'SENSITIVE_SCOPE_DECLARATIONS',
+        context.artifactFiles.length > 0
+          ? 'installed skill/plugin scopes are low-impact or not declared'
+          : 'no installed skill/plugin scope declarations found'
+      );
+    }
+
+    const hasCoverage = finding.requiredModules.some((moduleName) =>
+      this.policyHasModuleDecision(context.policyConfig.json, moduleName, 'ASK')
+      || this.policyHasModuleDecision(context.policyConfig.json, moduleName, 'DENY')
+    );
+
+    return {
+      id: 'SENSITIVE_SCOPE_DECLARATIONS',
+      status: hasCoverage ? 'WARN' : 'FAIL',
+      message: hasCoverage
+        ? `high-impact skill/plugin scope declared in ${this.relativeHomePath(finding.file.path)}`
+        : `high-impact skill/plugin scope lacks ASK/DENY policy coverage in ${this.relativeHomePath(finding.file.path)}`,
+      remediation: REMEDIATIONS.sensitiveScopeDeclarations,
+    };
+  }
+
   private computeFixActions(context: ScanContext): FixAction[] {
     const actions: FixAction[] = [];
 
@@ -923,16 +1365,406 @@ export class SecurityScanner {
     };
   }
 
-  private policyHasShellDecision(value: unknown, decision: 'ALLOW' | 'ASK' | 'DENY'): boolean {
-    const root = this.asRecord(value);
-    const modules = this.asRecord(root?.modules);
-    const shell = this.asRecord(modules?.Shell);
+  private hasConfigPattern(context: ScanContext, pattern: RegExp): boolean {
+    return [
+      context.policyConfig.raw,
+      context.openclawConfig.raw,
+      ...context.configFiles.map((file) => file.raw),
+    ]
+      .filter((raw): raw is string => typeof raw === 'string')
+      .some((raw) => pattern.test(raw));
+  }
 
-    if (!shell) {
+  private findOpenChannelDmPolicy(value: unknown): { channel: string; reason: string } | null {
+    const root = this.asRecord(value);
+    const channels = this.asRecord(root?.channels);
+    if (!channels) {
+      return null;
+    }
+
+    for (const channel of ['telegram', 'whatsapp', 'discord']) {
+      const config = this.asRecord(channels[channel]);
+      if (!config) {
+        continue;
+      }
+
+      const dmPolicy = typeof config.dmPolicy === 'string' ? config.dmPolicy.toLowerCase() : '';
+      const allowFrom = Array.isArray(config.allowFrom) ? config.allowFrom : [];
+      if (dmPolicy === 'open') {
+        return { channel, reason: 'all senders' };
+      }
+      if (allowFrom.includes('*')) {
+        return { channel, reason: 'wildcard senders' };
+      }
+    }
+
+    return null;
+  }
+
+  private findRiskyMcpFilesystemRoot(value: unknown): string | null {
+    const servers = this.getMcpServers(value);
+    for (const [name, server] of Object.entries(servers)) {
+      const command = typeof server.command === 'string' ? server.command.toLowerCase() : '';
+      const serverText = JSON.stringify(server).toLowerCase();
+      if (!/(filesystem|file-system|fs)/.test(`${name.toLowerCase()} ${command} ${serverText}`)) {
+        continue;
+      }
+
+      const candidates = this.collectStringValues(server);
+      const risky = candidates.find((entry) => this.isRiskyFilesystemRoot(entry));
+      if (risky) {
+        return risky;
+      }
+    }
+
+    return null;
+  }
+
+  private findRiskyMcpServerPinning(value: unknown): string | null {
+    const servers = this.getMcpServers(value);
+    for (const [name, server] of Object.entries(servers)) {
+      const command = typeof server.command === 'string' ? server.command : '';
+      const args = Array.isArray(server.args)
+        ? server.args.filter((entry): entry is string => typeof entry === 'string')
+        : [];
+      const commandLine = [command, ...args].join(' ');
+
+      if (RISKY_MCP_INSTALL_PATTERN.test(commandLine)) {
+        return name;
+      }
+    }
+
+    return null;
+  }
+
+  private findMcpRemoteWithoutAuth(value: unknown): { name: string; url: string; reason: string } | null {
+    const servers = this.getMcpServers(value);
+    for (const [name, server] of Object.entries(servers)) {
+      const url = typeof server.url === 'string' ? server.url : undefined;
+      if (!url || this.isLocalMcpUrl(url)) {
+        continue;
+      }
+
+      if (url.startsWith('http://')) {
+        return { name, url, reason: 'HTTP outside localhost' };
+      }
+
+      if (!this.mcpServerHasAuth(server)) {
+        return { name, url, reason: 'HTTPS without auth headers' };
+      }
+    }
+
+    return null;
+  }
+
+  private getMcpServers(value: unknown): Record<string, Record<string, unknown>> {
+    const root = this.asRecord(value);
+    const mcp = this.asRecord(root?.mcp);
+    const servers = this.asRecord(mcp?.servers ?? root?.mcpServers);
+    if (!servers) {
+      return {};
+    }
+
+    const result: Record<string, Record<string, unknown>> = {};
+    for (const [name, server] of Object.entries(servers)) {
+      const record = this.asRecord(server);
+      if (record) {
+        result[name] = record;
+      }
+    }
+
+    return result;
+  }
+
+  private collectStringValues(value: unknown): string[] {
+    if (typeof value === 'string') {
+      return [value];
+    }
+
+    if (Array.isArray(value)) {
+      return value.flatMap((entry) => this.collectStringValues(entry));
+    }
+
+    const record = this.asRecord(value);
+    if (!record) {
+      return [];
+    }
+
+    return Object.values(record).flatMap((entry) => this.collectStringValues(entry));
+  }
+
+  private isRiskyFilesystemRoot(value: string): boolean {
+    const expandedHome = this.userHome;
+    const normalized = value.replace(/^file:\/\//, '').replace(/\/+$/, '') || '/';
+    return normalized === '/'
+      || normalized === '~'
+      || normalized === '$HOME'
+      || normalized === expandedHome
+      || normalized === '.'
+      || normalized.includes('/.ssh')
+      || normalized.includes('/.aws')
+      || normalized.includes('/.gnupg')
+      || /(^|\/)Downloads($|\/)/.test(normalized);
+  }
+
+  private isLocalMcpUrl(value: string): boolean {
+    try {
+      const parsed = new URL(value);
+      return ['localhost', '127.0.0.1', '::1'].includes(parsed.hostname);
+    } catch {
+      return false;
+    }
+  }
+
+  private mcpServerHasAuth(server: Record<string, unknown>): boolean {
+    const headers = this.asRecord(server.headers);
+    if (headers && Object.entries(headers).some(([key, value]) =>
+      AUTH_HEADER_NAMES.has(key.toLowerCase()) && typeof value === 'string' && value.trim().length > 0
+    )) {
+      return true;
+    }
+
+    return false;
+  }
+
+  private hasBroadDeclaredArtifactPermission(file: ConfigSnapshot): boolean {
+    const scopes = this.extractDeclaredScopes(file.json);
+    if (scopes.length === 0) {
       return false;
     }
 
-    return Object.values(shell).some((rule) => this.asRecord(rule)?.action === decision);
+    return scopes.some((scope) => {
+      const normalized = this.normalizeScope(scope);
+      return WILDCARD_SCOPE_VALUES.has(normalized)
+        || normalized.endsWith(':*')
+        || normalized.endsWith('.*')
+        || normalized.endsWith('/*');
+    });
+  }
+
+  private findRiskyExternalOrigin(context: ScanContext): { file: ConfigSnapshot; reason: string } | null {
+    for (const file of context.artifactFiles) {
+      if (!file.raw || !EXTERNAL_ORIGIN_PATTERN.test(file.raw)) {
+        continue;
+      }
+
+      const reason = /(\/tmp\/|Downloads|Desktop|file:)/i.test(file.raw)
+        ? 'mutable local path'
+        : 'unpinned external skill/plugin origin';
+      return { file, reason };
+    }
+
+    for (const entry of this.collectPluginEntries(context.openclawConfig.json)) {
+      const values = this.collectStringValues(entry.config).join('\n');
+      if (EXTERNAL_ORIGIN_PATTERN.test(values)) {
+        const reason = /(\/tmp\/|Downloads|Desktop|file:)/i.test(values)
+          ? 'mutable local path'
+          : 'unpinned external skill/plugin origin';
+        return { file: context.openclawConfig, reason };
+      }
+    }
+
+    return null;
+  }
+
+  private async findWritableArtifactDirectory(
+    files: ConfigSnapshot[]
+  ): Promise<{ path: string; mode: number; isArtifact: boolean } | null> {
+    const checked = new Set<string>();
+    for (const file of files) {
+      let directory = path.dirname(file.path);
+      while (directory.startsWith(this.openclawHome) || directory.startsWith(path.join(this.userHome, '.claude'))) {
+        if (checked.has(directory)) {
+          break;
+        }
+        checked.add(directory);
+
+        try {
+          const stats = await fs.stat(directory);
+          const mode = stats.mode & 0o777;
+          if ((mode & 0o022) !== 0) {
+            return {
+              path: directory,
+              mode,
+              isArtifact: file.path.startsWith(path.join(this.openclawHome, 'skills'))
+                || file.path.startsWith(path.join(this.openclawHome, 'plugins'))
+                || file.path.startsWith(path.join(this.openclawHome, 'extensions')),
+            };
+          }
+        } catch {
+          break;
+        }
+
+        const parent = path.dirname(directory);
+        if (parent === directory || directory === this.openclawHome || directory === path.join(this.userHome, '.claude')) {
+          break;
+        }
+        directory = parent;
+      }
+    }
+
+    return null;
+  }
+
+  private findSensitiveScopeDeclaration(
+    context: ScanContext
+  ): { file: ConfigSnapshot; requiredModules: string[] } | null {
+    for (const file of context.artifactFiles) {
+      const declaredScopes = this.extractDeclaredScopes(file.json);
+      if (declaredScopes.length === 0) {
+        continue;
+      }
+
+      const requiredModules = this.requiredPolicyModulesForScopes(declaredScopes);
+      if (requiredModules.length > 0) {
+        return { file, requiredModules };
+      }
+    }
+
+    return null;
+  }
+
+  private findUnpinnedPluginDependency(
+    artifactFiles: ConfigSnapshot[]
+  ): { file: ConfigSnapshot; name: string; version: string } | null {
+    for (const file of artifactFiles) {
+      if (file.name !== 'package.json') {
+        continue;
+      }
+
+      const packageJson = this.asRecord(file.json);
+      if (!packageJson) {
+        continue;
+      }
+
+      for (const sectionName of ['dependencies', 'devDependencies', 'optionalDependencies']) {
+        const dependencies = this.asRecord(packageJson[sectionName]);
+        if (!dependencies) {
+          continue;
+        }
+
+        for (const [name, version] of Object.entries(dependencies)) {
+          if (typeof version !== 'string' || !this.isPinnedPackageVersion(version)) {
+            return { file, name, version: typeof version === 'string' ? version : '<non-string>' };
+          }
+        }
+      }
+    }
+
+    return null;
+  }
+
+  private isPinnedPackageVersion(value: string): boolean {
+    return PINNED_PACKAGE_VERSION_PATTERN.test(value.trim());
+  }
+
+  private requiredPolicyModulesForScopes(scopes: string[]): string[] {
+    const modules = new Set<string>();
+    for (const mapping of SCOPE_TO_POLICY_MODULES) {
+      if (scopes.some((scope) => mapping.values.some((value) => this.scopeMatches(scope, value)))) {
+        mapping.modules.forEach((moduleName) => modules.add(moduleName));
+      }
+    }
+
+    return Array.from(modules);
+  }
+
+  private extractDeclaredScopes(value: unknown): string[] {
+    const record = this.asRecord(value);
+    if (!record) {
+      return [];
+    }
+
+    const scopes: string[] = [];
+    for (const key of DECLARED_SCOPE_KEYS) {
+      scopes.push(...this.collectScopeValues(record[key]));
+    }
+
+    return scopes;
+  }
+
+  private collectScopeValues(value: unknown): string[] {
+    if (typeof value === 'string') {
+      return [value];
+    }
+
+    if (Array.isArray(value)) {
+      return value.flatMap((entry) => this.collectScopeValues(entry));
+    }
+
+    const record = this.asRecord(value);
+    if (!record) {
+      return [];
+    }
+
+    return Object.entries(record).flatMap(([key, entry]) => {
+      if (entry === true) {
+        return [key];
+      }
+      return this.collectScopeValues(entry);
+    });
+  }
+
+  private scopeMatches(scope: string, expected: string): boolean {
+    const normalized = this.normalizeScope(scope);
+    return normalized === expected
+      || normalized.startsWith(`${expected}:`)
+      || normalized.startsWith(`${expected}.`)
+      || normalized.startsWith(`${expected}/`)
+      || normalized.endsWith(`:${expected}`)
+      || normalized.endsWith(`.${expected}`)
+      || normalized.endsWith(`/${expected}`);
+  }
+
+  private normalizeScope(value: string): string {
+    return value.trim().toLowerCase().replace(/_/g, '-');
+  }
+
+  private collectPluginEntries(value: unknown): Array<{ name: string; config: Record<string, unknown> }> {
+    const root = this.asRecord(value);
+    const plugins = this.asRecord(root?.plugins);
+    const entries = this.asRecord(plugins?.entries ?? root?.pluginEntries);
+    if (!entries) {
+      return [];
+    }
+
+    const result: Array<{ name: string; config: Record<string, unknown> }> = [];
+    for (const [name, entry] of Object.entries(entries)) {
+      const record = this.asRecord(entry);
+      if (record) {
+        result.push({ name, config: record });
+      }
+    }
+
+    return result;
+  }
+
+  private relativeHomePath(filePath: string): string {
+    if (filePath === this.userHome) {
+      return '~';
+    }
+
+    if (filePath.startsWith(`${this.userHome}${path.sep}`)) {
+      return `~${path.sep}${path.relative(this.userHome, filePath)}`;
+    }
+
+    return filePath;
+  }
+
+  private policyHasShellDecision(value: unknown, decision: 'ALLOW' | 'ASK' | 'DENY'): boolean {
+    return this.policyHasModuleDecision(value, 'Shell', decision);
+  }
+
+  private policyHasModuleDecision(value: unknown, moduleName: string, decision: 'ALLOW' | 'ASK' | 'DENY'): boolean {
+    const root = this.asRecord(value);
+    const modules = this.asRecord(root?.modules);
+    const moduleConfig = this.asRecord(modules?.[moduleName]);
+
+    if (!moduleConfig) {
+      return false;
+    }
+
+    return Object.values(moduleConfig).some((rule) => this.asRecord(rule)?.action === decision);
   }
 
   private findFirstConfigValue(configFiles: ConfigSnapshot[], keys: string[]): string | undefined {
@@ -1141,6 +1973,18 @@ function compareVersions(left: string, right: string): number {
 
 function escapeRegex(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function expandHome(value: string, userHome: string): string {
+  if (value === '~') {
+    return userHome;
+  }
+
+  if (value.startsWith(`~${path.sep}`)) {
+    return path.join(userHome, value.slice(2));
+  }
+
+  return value;
 }
 
 function formatMode(mode?: number): string {

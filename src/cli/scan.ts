@@ -701,6 +701,7 @@ function diffJson(pathPrefix: string, previous: JsonValue, current: JsonValue, c
     diffJson(nextPath, previousRecord[key], currentRecord[key], changes);
   }
 }
+
 function openHtmlReport(reportPath: string): void {
   try {
     if (process.platform === 'darwin') {

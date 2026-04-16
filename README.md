@@ -41,7 +41,7 @@ clawreins scan
 ![ClawReins security scan](./public/clawreins_security_scan.gif)
 
 ```bash
-clawreins scan            # 13-check security audit
+clawreins scan            # 25-check security audit
 clawreins scan --fix      # Auto-fix with backup
 clawreins scan --json     # Machine-readable for CI
 clawreins scan --monitor  # Compare against baseline, alert on drift
@@ -64,6 +64,18 @@ clawreins scan --monitor  # Compare against baseline, alert on drift
 | `NODEJS_VERSION` | Critical | Node.js affected by CVE-2026-21636 permission bypass | No |
 | `CONTROL_UI_AUTH` | Critical | Control UI authentication bypass enabled | Yes |
 | `BROWSER_UNSANDBOXED` | Critical | Browser skill missing headless or sandbox protection | No |
+| `CHANNEL_DM_POLICY` | Critical | Telegram, WhatsApp, or Discord DMs open to all or wildcard senders | No |
+| `MCP_ENABLE_ALL_SERVERS` | Critical | Project MCP servers automatically trusted without individual approval | No |
+| `MCP_FILESYSTEM_ROOTS` | Warning | Filesystem MCP servers exposing broad or sensitive roots | No |
+| `MCP_SERVER_PINNING` | Warning | MCP server commands using unpinned packages or shell-piped remote installers | No |
+| `MCP_REMOTE_TRANSPORT_AUTH` | Critical/Warning | Remote MCP servers using HTTP or HTTPS without auth headers | No |
+| `INSTALLED_ARTIFACT_RISK` | Warning | Installed skills/plugins containing risky shell, network, or dynamic-code patterns | No |
+| `SKILL_PERMISSION_BOUNDARIES` | Warning | Installed skills/plugins requesting broad or wildcard capabilities | No |
+| `LOCAL_STATE_EXPOSURE` | Critical | Local agent state containing plaintext secrets | No |
+| `SKILL_EXTERNAL_ORIGIN` | Critical/Warning | Installed skills/plugins sourced from mutable local paths or unpinned external origins | No |
+| `WORLD_WRITABLE_ARTIFACTS` | Critical/Warning | Installed skills/plugins or local state writable by group/other users | No |
+| `PLUGIN_DEPENDENCY_PINNING` | Warning | Plugin package dependencies that use ranges, wildcards, or mutable sources instead of exact versions | No |
+| `SENSITIVE_SCOPE_DECLARATIONS` | Critical/Warning | High-impact skill/plugin scopes without corresponding ASK/DENY policy coverage | No |
 
 Exit codes: `0` = SECURE, `1` = NEEDS ATTENTION, `2` = EXPOSED
 
@@ -135,7 +147,7 @@ Remaining risks (AST02, AST04, AST05, AST10) are on the roadmap. Learn more: [OW
 
 ```bash
 clawreins init              # Interactive setup wizard
-clawreins scan              # 13-check security audit
+clawreins scan              # 25-check security audit
 clawreins scan --fix        # Auto-fix with backup
 clawreins scan --json       # Machine-readable output for CI
 clawreins scan --monitor    # Drift detection against baseline
@@ -148,7 +160,7 @@ clawreins enable / disable  # Toggle protection
 ## Roadmap
 
 ### Shipped
-- [x] 13-point security scan with auto-fix
+- [x] 25-point security scan with auto-fix
 - [x] Watchtower dashboard (security score, drift detection, analytics)
 - [x] MCP Control Panel (tool allow/block, resource access, audit log)
 - [x] Org-wide shell policy (auto-deny dangerous commands)
