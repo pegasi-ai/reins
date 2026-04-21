@@ -9,6 +9,7 @@ import chalk from 'chalk';
 import os from 'os';
 import path from 'path';
 import { FixAction, FixResult, ScanCheck, ScanReport, SecurityScanner } from '../core/SecurityScanner';
+import { ClaudeCodeScanner } from '../core/ClaudeCodeScanner';
 import { logger } from '../core/Logger';
 import {
   ConfigDiffEntry,
@@ -74,7 +75,23 @@ export async function scanCommand(options: ScanCommandOptions): Promise<void> {
     }
 
     const scanner = new SecurityScanner();
-    let report = await scanner.run();
+    const [baseReport, claudeChecks] = await Promise.all([
+      scanner.run(),
+      new ClaudeCodeScanner().run(),
+    ]);
+
+    const mergedChecks: ScanCheck[] = [...baseReport.checks, ...claudeChecks];
+    let report: ScanReport = {
+      checks: mergedChecks,
+      score: mergedChecks.filter((c) => c.status === 'PASS').length,
+      total: mergedChecks.length,
+      verdict: mergedChecks.some((c) => c.status === 'FAIL')
+        ? 'EXPOSED'
+        : mergedChecks.some((c) => c.status === 'WARN')
+          ? 'NEEDS ATTENTION'
+          : 'SECURE',
+      timestamp: baseReport.timestamp,
+    };
     let monitorComparison: DriftComparison | null = null;
     const command = renderScanCommand();
 
