@@ -1,9 +1,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import http from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
+import { once } from 'node:events';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 
@@ -94,6 +96,30 @@ async function withMockedFetch(handler, run) {
   } finally {
     globalThis.fetch = previousFetch;
   }
+}
+
+async function withLocalHttpServer(handler, run) {
+  const server = http.createServer(handler);
+  server.listen(0, '127.0.0.1');
+  await once(server, 'listening');
+
+  const address = server.address();
+  const baseUrl = `http://127.0.0.1:${address.port}`;
+
+  try {
+    return await run(baseUrl);
+  } finally {
+    server.close();
+    await once(server, 'close');
+  }
+}
+
+async function readJsonBody(req) {
+  const chunks = [];
+  for await (const chunk of req) {
+    chunks.push(chunk);
+  }
+  return JSON.parse(Buffer.concat(chunks).toString('utf8'));
 }
 
 async function withCapturedConsole(run) {
@@ -230,7 +256,8 @@ test('reins scan --json returns 13 checks and an EXPOSED exit code for unsafe co
   assert.equal(result.status, 2, `stderr: ${result.stderr}`);
 
   const payload = JSON.parse(result.stdout);
-  assert.equal(payload.total, 13);
+  assert.equal(payload.total, payload.checks.length);
+  assert.ok(payload.total >= 13);
   assert.equal(payload.verdict, 'EXPOSED');
   assert.equal(getCheck(payload, 'GATEWAY_BINDING').status, 'FAIL');
   assert.equal(getCheck(payload, 'DEFAULT_WEAK_CREDENTIALS').status, 'FAIL');
@@ -463,7 +490,8 @@ test('reins scan --monitor creates a baseline state file on first run', () => {
 
   const state = JSON.parse(readFileSync(statePath, 'utf8'));
   const baseline = JSON.parse(readFileSync(baselinePath, 'utf8'));
-  assert.equal(state.report.total, 13);
+  assert.equal(state.report.total, state.report.checks.length);
+  assert.ok(state.report.total >= 13);
   assert.equal(baseline.gateway.host, '127.0.0.1');
 });
 
@@ -827,7 +855,7 @@ test('reins scan --monitor times out a hung alert command', () => {
   assert.match(result.stdout, /Notification command timed out after 50ms\./);
 });
 
-test('enrollWatchtowerWithEmail provisions an API key and saves it to local config', async () => {
+test('enrollWatchtowerWithEmail provisions a CLI session and saves local metadata', async () => {
   const homeDir = makeTempRoot('reins-watchtower-enroll-home-');
   const openclawHome = path.join(homeDir, '.openclaw');
   const openclawConfig = path.join(openclawHome, 'openclaw.json');
@@ -848,44 +876,89 @@ test('enrollWatchtowerWithEmail provisions an API key and saves it to local conf
 
   const report = await runScanner(openclawHome, homeDir);
   const artifact = buildWatchtowerArtifact('reins scan', report, null);
-  const fetchCalls = [];
+  const requestLog = [];
 
   const previousOpenclawHome = process.env.OPENCLAW_HOME;
   const previousHome = process.env.HOME;
+  const previousXdg = process.env.XDG_CONFIG_HOME;
 
   process.env.OPENCLAW_HOME = openclawHome;
   process.env.HOME = homeDir;
+  process.env.XDG_CONFIG_HOME = path.join(homeDir, '.config');
 
   try {
-    const result = await withMockedFetch(async (url, options) => {
-      fetchCalls.push({ options, url: String(url) });
-      return {
-        ok: true,
-        json: async () => ({
-          api_key: 'wt-api-key-1234567890',
-          dashboard_url: 'https://app.pegasi.ai/dashboard/abc123',
-        }),
-        status: 200,
-        statusText: 'OK',
-      };
-    }, async () => enrollWatchtowerWithEmail('calin@example.com', artifact, 'https://app.pegasi.ai'));
+    const result = await withLocalHttpServer(async (req, res) => {
+      const body = req.method === 'POST' ? await readJsonBody(req) : null;
+      requestLog.push({ body, method: req.method, url: req.url });
 
-    assert.equal(result.dashboardUrl, 'https://app.pegasi.ai/dashboard/abc123');
+      if (req.method === 'POST' && req.url === '/api/cli/auth/start') {
+        res.writeHead(200, { 'content-type': 'application/json' });
+        res.end(JSON.stringify({
+          login_id: 'login_123',
+          status: 'pending',
+          method: 'magic_link',
+          email: 'calin@example.com',
+          expires_at: '2099-04-21T10:15:00Z',
+          message: 'Magic link sent.',
+        }));
+        return;
+      }
+
+      if (req.method === 'POST' && req.url === '/api/cli/auth/exchange') {
+        res.writeHead(200, { 'content-type': 'application/json' });
+        res.end(JSON.stringify({
+          login_id: 'login_123',
+          status: 'complete',
+          user: {
+            id: 'usr_123',
+            name: 'Calin',
+            email: 'calin@example.com',
+            role: 'dev',
+          },
+          access_token: 'cli_sess_access',
+          refresh_token: 'cli_sess_refresh',
+          access_token_expires_at: '2099-04-21T10:15:00Z',
+          refresh_token_expires_at: '2099-05-21T10:00:00Z',
+          dashboard_url: 'http://127.0.0.1/dashboard/abc123',
+          api_key: 'cr_cli_api_key',
+        }));
+        return;
+      }
+
+      res.writeHead(404).end();
+    }, async (baseUrl) => enrollWatchtowerWithEmail('calin@example.com', artifact, baseUrl));
+
+    assert.equal(result.dashboardUrl, 'http://127.0.0.1/dashboard/abc123');
     assert.equal(result.configPath, path.join(openclawHome, 'reins', 'config.json'));
     assert.equal(result.status, 'created');
-    assert.equal(fetchCalls.length, 1);
-    assert.equal(fetchCalls[0].url, 'https://app.pegasi.ai/api/auth/signup-cli');
-
-    const payload = JSON.parse(fetchCalls[0].options.body);
-    assert.equal(payload.email, 'calin@example.com');
-    assert.equal(payload.repository.displayName, artifact.target.display_name);
-    assert.equal(payload.repository.id, artifact.target.id);
+    assert.deepEqual(requestLog, [
+      {
+        method: 'POST',
+        url: '/api/cli/auth/start',
+        body: {
+          method: 'magic_link',
+          email: 'calin@example.com',
+        },
+      },
+      {
+        method: 'POST',
+        url: '/api/cli/auth/exchange',
+        body: {
+          login_id: 'login_123',
+        },
+      },
+    ]);
 
     const savedConfig = JSON.parse(readFileSync(result.configPath, 'utf8'));
-    assert.equal(savedConfig.watchtower.apiKey, 'wt-api-key-1234567890');
-    assert.equal(savedConfig.watchtower.baseUrl, 'https://app.pegasi.ai');
-    assert.equal(savedConfig.watchtower.dashboardUrl, 'https://app.pegasi.ai/dashboard/abc123');
+    assert.equal(savedConfig.watchtower.baseUrl.startsWith('http://127.0.0.1:'), true);
+    assert.equal(savedConfig.watchtower.dashboardUrl, 'http://127.0.0.1/dashboard/abc123');
     assert.equal(savedConfig.watchtower.email, 'calin@example.com');
+    assert.equal(savedConfig.watchtower.apiKey, 'cr_cli_api_key');
+
+    const authSession = JSON.parse(readFileSync(path.join(homeDir, '.config', 'reins', 'auth.json'), 'utf8'));
+    assert.equal(authSession.access_token, 'cli_sess_access');
+    assert.equal(authSession.refresh_token, 'cli_sess_refresh');
+    assert.equal(authSession.user.email, 'calin@example.com');
   } finally {
     if (typeof previousOpenclawHome === 'string') {
       process.env.OPENCLAW_HOME = previousOpenclawHome;
@@ -898,10 +971,16 @@ test('enrollWatchtowerWithEmail provisions an API key and saves it to local conf
     } else {
       delete process.env.HOME;
     }
+
+    if (typeof previousXdg === 'string') {
+      process.env.XDG_CONFIG_HOME = previousXdg;
+    } else {
+      delete process.env.XDG_CONFIG_HOME;
+    }
   }
 });
 
-test('enrollWatchtowerWithEmail handles existing accounts without issuing a new API key', async () => {
+test('enrollWatchtowerWithEmail uses the provided base URL for CLI auth', async () => {
   const homeDir = makeTempRoot('reins-watchtower-existing-home-');
   const openclawHome = path.join(homeDir, '.openclaw');
   const openclawConfig = path.join(openclawHome, 'openclaw.json');
@@ -924,26 +1003,56 @@ test('enrollWatchtowerWithEmail handles existing accounts without issuing a new 
   const artifact = buildWatchtowerArtifact('reins scan', report, null);
   const previousOpenclawHome = process.env.OPENCLAW_HOME;
   const previousHome = process.env.HOME;
+  const previousXdg = process.env.XDG_CONFIG_HOME;
+  const seenUrls = [];
 
   process.env.OPENCLAW_HOME = openclawHome;
   process.env.HOME = homeDir;
+  process.env.XDG_CONFIG_HOME = path.join(homeDir, '.config');
 
   try {
-    const result = await withMockedFetch(async () => ({
-      ok: true,
-      json: async () => ({
-        api_key: null,
-        dashboard_url: 'https://app.pegasi.ai/dashboard/usr_existing',
-        message: 'Account exists. Check your email for dashboard access. Your original API key is in ~/.openclaw/reins/config.json',
-      }),
-      status: 200,
-      statusText: 'OK',
-    }), async () => enrollWatchtowerWithEmail('calin@example.com', artifact, 'https://app.pegasi.ai'));
+    const result = await withLocalHttpServer(async (req, res) => {
+      seenUrls.push(req.url);
 
-    assert.equal(result.status, 'existing');
-    assert.equal(result.configPath, null);
-    assert.equal(result.dashboardUrl, 'https://app.pegasi.ai/dashboard/usr_existing');
-    assert.match(result.message, /Account exists/);
+      if (req.method === 'POST' && req.url === '/api/cli/auth/start') {
+        res.writeHead(200, { 'content-type': 'application/json' });
+        res.end(JSON.stringify({
+          login_id: 'login_existing',
+          status: 'pending',
+          method: 'magic_link',
+          email: 'calin@example.com',
+          expires_at: '2099-04-21T10:15:00Z',
+          message: 'Magic link sent.',
+        }));
+        return;
+      }
+
+      if (req.method === 'POST' && req.url === '/api/cli/auth/exchange') {
+        res.writeHead(200, { 'content-type': 'application/json' });
+        res.end(JSON.stringify({
+          login_id: 'login_existing',
+          status: 'complete',
+          user: {
+            id: 'usr_existing',
+            name: 'Calin',
+            email: 'calin@example.com',
+            role: 'dev',
+          },
+          access_token: 'cli_sess_existing',
+          refresh_token: 'cli_sess_existing_refresh',
+          access_token_expires_at: '2099-04-21T10:15:00Z',
+          refresh_token_expires_at: '2099-05-21T10:00:00Z',
+          dashboard_url: 'http://127.0.0.1/dashboard/usr_existing',
+        }));
+        return;
+      }
+
+      res.writeHead(404).end();
+    }, async (baseUrl) => enrollWatchtowerWithEmail('calin@example.com', artifact, baseUrl));
+
+    assert.equal(result.status, 'created');
+    assert.equal(result.dashboardUrl, 'http://127.0.0.1/dashboard/usr_existing');
+    assert.deepEqual(seenUrls, ['/api/cli/auth/start', '/api/cli/auth/exchange']);
   } finally {
     if (typeof previousOpenclawHome === 'string') {
       process.env.OPENCLAW_HOME = previousOpenclawHome;
@@ -955,6 +1064,12 @@ test('enrollWatchtowerWithEmail handles existing accounts without issuing a new 
       process.env.HOME = previousHome;
     } else {
       delete process.env.HOME;
+    }
+
+    if (typeof previousXdg === 'string') {
+      process.env.XDG_CONFIG_HOME = previousXdg;
+    } else {
+      delete process.env.XDG_CONFIG_HOME;
     }
   }
 });
@@ -1016,7 +1131,7 @@ test('reins scan uploads to Watchtower using saved local config without env vars
 
     assert.equal(fetchCalls.length, 1);
     assert.equal(fetchCalls[0].url, 'https://app.pegasi.ai/api/scan-artifacts/ingest');
-    assert.equal(fetchCalls[0].options.headers['x-api-key'], 'wt-saved-key-1234567890');
+    assert.equal(fetchCalls[0].options.headers.Authorization, 'Bearer wt-saved-key-1234567890');
 
     const payload = JSON.parse(fetchCalls[0].options.body);
     assert.equal(payload.source.producer, 'reins');

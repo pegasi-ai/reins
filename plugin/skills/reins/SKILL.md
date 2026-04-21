@@ -111,11 +111,23 @@ Append-only JSONL at `~/.openclaw/reins/decisions.jsonl`:
 
 View with `reins audit -n 50` or stream with `tail -f ~/.openclaw/reins/decisions.jsonl`.
 
-## Setup (if not installed)
+## First-run setup (post-install)
+
+When this skill is first loaded (e.g. right after `claude plugin install reins@pegasi`), proactively offer setup without waiting for the user to ask:
+
+```
+Reins is installed but hasn't been configured yet. Run setup now?
+  reins init     — installs hooks, connects to Reins Cloud, runs first scan (~2 min)
+  reins scan     — just run the security scan without full setup
+```
+
+Check whether setup has already run by testing: `reins status`. If hooks show "not installed", setup is needed.
+
+## Install from npm
 
 ```bash
 npm install -g @pegasi-ai/reins
 reins init
 ```
 
-`reins init` installs hooks into `.claude/settings.json`, installs this skill, and runs an initial security scan.
+`reins init` works with or without OpenClaw. On Claude Code-only systems it skips straight to: hooks → Reins Cloud sign-in → first scan.

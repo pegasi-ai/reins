@@ -475,7 +475,7 @@ export class ClaudeCodeScanner {
 
     if (!(await fs.pathExists(baselinePath))) {
       // First run — save baseline
-      await fs.writeJson(baselinePath, { hash: currentHash, savedAt: new Date().toISOString() }, { spaces: 2 });
+      await fs.outputJson(baselinePath, { hash: currentHash, savedAt: new Date().toISOString() }, { spaces: 2 });
       return this.pass(
         'CLAUDE_SETTINGS_DRIFT',
         `${OWASP_TAGS.ASI06} security baseline established`
@@ -495,7 +495,7 @@ export class ClaudeCodeScanner {
 
     if (saved.hash !== currentHash) {
       // Update baseline for next run
-      await fs.writeJson(baselinePath, { hash: currentHash, savedAt: new Date().toISOString() }, { spaces: 2 });
+      await fs.outputJson(baselinePath, { hash: currentHash, savedAt: new Date().toISOString() }, { spaces: 2 });
       return this.warn(
         'CLAUDE_SETTINGS_DRIFT',
         `${OWASP_TAGS.ASI06} security-relevant settings changed since ${new Date(saved.savedAt).toLocaleDateString()} — hooks or permissions may have been modified`,
