@@ -112,6 +112,7 @@ async function main(): Promise<void> {
   }
 
   const decisionTimeMs = Date.now() - startTime;
+  const runId = getCurrentRunId();
 
   // 3. Build audit entry
   const auditEntry: AuditEntry = {
@@ -127,7 +128,7 @@ async function main(): Promise<void> {
     hostname: os.hostname(),
     cwd: process.cwd(),
     session_id: input.session_id ?? null,
-    run_id: getCurrentRunId(),
+    run_id: runId,
   };
 
   // 4. Append to decisions.jsonl (sync)
@@ -138,13 +139,11 @@ async function main(): Promise<void> {
     // Non-fatal.
   }
 
-  // 5. Load config + run_id
-  let runId: string | null = null;
+  // 5. Load Watchtower credentials
   let watchtowerApiKey: string | null = null;
   let watchtowerBaseUrl: string | null = null;
 
   try {
-    runId = getCurrentRunId();
     const creds = await resolveWatchtowerCredentials();
     if (creds) {
       watchtowerApiKey = creds.apiKey;
@@ -155,21 +154,21 @@ async function main(): Promise<void> {
   }
 
   // 6. If connected, POST to Watchtower with 200ms timeout
-  if (watchtowerApiKey && watchtowerBaseUrl && runId) {
+  if (watchtowerApiKey && watchtowerBaseUrl) {
     const policyDecision: PolicyDecision = {
       timestamp: auditEntry.timestamp,
       tool: toolName,
       action: actionSummary,
       decision: 'ALLOWED',
-      severity: undefined,
-      rule: undefined,
-      decision_time_ms: decisionTimeMs,
+      decisionTime: decisionTimeMs,
       module: moduleName,
+      method: methodName,
+      run_id: runId,
     };
 
     try {
       await Promise.race([
-        logPolicyDecision(watchtowerApiKey, watchtowerBaseUrl, runId, policyDecision, 200),
+        logPolicyDecision(watchtowerApiKey, watchtowerBaseUrl, '', policyDecision, 200),
         new Promise<void>((_, reject) => setTimeout(() => reject(new Error('timeout')), 200)),
       ]);
     } catch {

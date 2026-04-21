@@ -161,8 +161,13 @@ export interface PolicyDecision {
   decision: 'ALLOWED' | 'BLOCKED' | 'WARNED';
   severity?: string;
   rule?: string;
-  decision_time_ms: number;
+  /** @deprecated use decisionTime */
+  decision_time_ms?: number;
+  decisionTime: number;
   module: string;
+  method: string;
+  reason?: string;
+  run_id?: string | null;
 }
 
 // ─── Internal helpers ──────────────────────────────────────────────────────
@@ -630,19 +635,43 @@ export async function startRun(
 }
 
 /**
- * POST /api/runs/:id/policy_decisions — logs a single decision.
- * Default timeout is 200ms (fire-and-forget from hooks).
+ * POST /api/ingest/decisions — sends one or more decisions to Reins Cloud.
+ * Default timeout is 200ms for fire-and-forget hook use; pass a higher value for
+ * batch flushes. Never throws — callers must handle the returned status.
+ */
+export async function ingestDecisions(
+  apiKey: string,
+  baseUrl: string,
+  decisions: PolicyDecision[],
+  timeoutMs = 200
+): Promise<{ status: number }> {
+  const url = buildWatchtowerUrl(baseUrl, '/api/ingest/decisions');
+  const payload = decisions.map((d) => ({
+    timestamp: d.timestamp,
+    module: d.module,
+    method: d.method,
+    tool: d.tool,
+    decision: d.decision,
+    reason: d.reason ?? d.rule,
+    decisionTime: d.decisionTime,
+    run_id: d.run_id ?? null,
+  }));
+  const { status } = await nodeRequest('POST', url, bearerHeaders(apiKey), JSON.stringify(payload), timeoutMs);
+  return { status };
+}
+
+/**
+ * Fire-and-forget a single decision from a hook. Falls back silently on timeout/error.
  */
 export async function logPolicyDecision(
   apiKey: string,
   baseUrl: string,
-  runId: string,
+  _runId: string,
   decision: PolicyDecision,
   timeoutMs = 200
 ): Promise<void> {
-  const url = buildWatchtowerUrl(baseUrl, `/api/runs/${runId}/policy_decisions`);
-  await nodeRequest('POST', url, bearerHeaders(apiKey), JSON.stringify(decision), timeoutMs);
-  // We intentionally do not throw on non-2xx here — hooks must never block on this.
+  await ingestDecisions(apiKey, baseUrl, [decision], timeoutMs);
+  // Intentionally swallow errors — hooks must never block on this.
 }
 
 /**
@@ -652,31 +681,16 @@ export async function logPolicyDecision(
 export async function flushDecisions(
   apiKey: string,
   baseUrl: string,
-  runId: string,
+  _runId: string,
   decisions: PolicyDecision[]
 ): Promise<{ succeeded: number; failed: number }> {
-  let succeeded = 0;
-  let failed = 0;
-
-  for (const decision of decisions) {
-    try {
-      const url = buildWatchtowerUrl(baseUrl, `/api/runs/${runId}/policy_decisions`);
-      const { status } = await nodeRequest(
-        'POST',
-        url,
-        bearerHeaders(apiKey),
-        JSON.stringify(decision),
-        10_000
-      );
-      if (status >= 200 && status < 300) {
-        succeeded++;
-      } else {
-        failed++;
-      }
-    } catch {
-      failed++;
+  try {
+    const { status } = await ingestDecisions(apiKey, baseUrl, decisions, 10_000);
+    if (status >= 200 && status < 300) {
+      return { succeeded: decisions.length, failed: 0 };
     }
+    return { succeeded: 0, failed: decisions.length };
+  } catch {
+    return { succeeded: 0, failed: decisions.length };
   }
-
-  return { succeeded, failed };
 }

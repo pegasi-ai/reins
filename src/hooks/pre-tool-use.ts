@@ -262,6 +262,7 @@ async function main(): Promise<void> {
   }
 
   // 8. Build PolicyDecision object
+  const methodName = moduleName === 'Shell' ? 'bash' : moduleName.toLowerCase();
   const policyDecision: PolicyDecision = {
     timestamp: new Date().toISOString(),
     tool: toolName,
@@ -269,8 +270,11 @@ async function main(): Promise<void> {
     decision: evalResult.decision,
     severity: evalResult.severity,
     rule: evalResult.rule,
-    decision_time_ms: decisionTimeMs,
+    reason: evalResult.description ?? evalResult.rule,
+    decisionTime: decisionTimeMs,
     module: moduleName,
+    method: methodName,
+    run_id: runId,
   };
 
   // 9. Determine exit code before any async work
