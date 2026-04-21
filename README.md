@@ -21,7 +21,7 @@ Reins enforces deterministic security policies on every agent action via Claude 
 ## Quickstart
 
 ```bash
-npm install -g @pegasi/reins
+npm install -g @pegasi-ai/reins
 reins init
 ```
 
