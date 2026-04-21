@@ -174,7 +174,12 @@ export async function resolveWatchtowerCredentials(): Promise<WatchtowerCredenti
   }
 
   const saved = await loadWatchtowerSettings();
-  const baseUrl = saved?.baseUrl?.trim() || envBaseUrl || DEFAULT_WATCHTOWER_BASE_URL;
+  const baseUrl = (() => {
+    if (isInternalBaseUrlSwitchingEnabled() && saved?.baseUrlTarget) {
+      return resolveInternalBaseUrlTarget(saved.baseUrlTarget);
+    }
+    return saved?.baseUrl?.trim() || envBaseUrl || DEFAULT_WATCHTOWER_BASE_URL;
+  })();
   let session = await loadAuthSession();
 
   if (session) {
@@ -222,11 +227,15 @@ export async function resolveWatchtowerCredentials(): Promise<WatchtowerCredenti
 
 export async function resolveCliAuthAccess(): Promise<CliAuthAccess | null> {
   const saved = await loadWatchtowerSettings();
-  const baseUrl =
-    saved?.baseUrl?.trim()
-    || process.env.REINS_WATCHTOWER_BASE_URL?.trim()
-    || process.env.CLAWREINS_WATCHTOWER_BASE_URL?.trim()
-    || DEFAULT_WATCHTOWER_BASE_URL;
+  const baseUrl = (() => {
+    if (isInternalBaseUrlSwitchingEnabled() && saved?.baseUrlTarget) {
+      return resolveInternalBaseUrlTarget(saved.baseUrlTarget);
+    }
+    return saved?.baseUrl?.trim()
+      || process.env.REINS_WATCHTOWER_BASE_URL?.trim()
+      || process.env.CLAWREINS_WATCHTOWER_BASE_URL?.trim()
+      || DEFAULT_WATCHTOWER_BASE_URL;
+  })();
 
   let session = await loadAuthSession();
 
