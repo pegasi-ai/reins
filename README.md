@@ -16,7 +16,7 @@
 
 > In Greek myth, Athena gave Bellerophon the golden bridle — reins included — that let him guide Pegasus. Reins applies the same idea to AI agents: raw power is not enough — what matters is making it controllable.
 
-Reins enforces deterministic security policies on every agent action via Claude Code PreToolUse and PostToolUse hooks. Policies are evaluated in under 50ms with no LLM in the enforcement path.
+Reins enforces deterministic security policies on every agent action, scans your configs for OWASP ASI10 vulnerabilities, and tracks drift over time. Policies evaluate in under 50ms. Works with Claude Code PreToolUse and PostToolUse hooks, OpenClaw, and any MCP-compatible agent.
 
 ## Quickstart
 
