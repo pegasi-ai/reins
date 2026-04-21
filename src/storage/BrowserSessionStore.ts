@@ -8,8 +8,8 @@
 import crypto from 'crypto';
 import fs from 'fs-extra';
 import os from 'os';
-import path from 'path';
-import { CLAWREINS_DATA_DIR, logger } from '../core/Logger';
+import { logger } from '../core/Logger';
+import { getDataPath, getPreferredDataPath, getReinsDataDir } from '../core/data-dir';
 
 interface StoredRecord {
   updatedAt: string;
@@ -29,7 +29,6 @@ export interface SessionInjectionResult {
   injectedFields: string[];
 }
 
-const STORE_FILE = path.join(CLAWREINS_DATA_DIR, 'browser-sessions.json');
 const SESSION_FIELDS = [
   'storageState',
   'cookies',
@@ -42,7 +41,9 @@ const SESSION_FIELDS = [
 
 function deriveKey(): Buffer {
   const seed =
-    process.env.CLAWREINS_SESSION_KEY || `${os.homedir()}|${os.hostname()}|clawreins-browser-sessions`;
+    process.env.REINS_SESSION_KEY
+    || process.env.CLAWREINS_SESSION_KEY
+    || `${os.homedir()}|${os.hostname()}|reins-browser-sessions`;
   return crypto.createHash('sha256').update(seed).digest();
 }
 
@@ -81,11 +82,12 @@ function decryptJson(record: StoredRecord): Record<string, unknown> | null {
 
 function loadStore(): StoreEnvelope {
   try {
-    fs.ensureDirSync(CLAWREINS_DATA_DIR);
-    if (!fs.pathExistsSync(STORE_FILE)) {
+    const storeFile = getDataPath('browser-sessions.json');
+    fs.ensureDirSync(getReinsDataDir());
+    if (!fs.pathExistsSync(storeFile)) {
       return { version: '1.0.0', records: {} };
     }
-    const envelope = fs.readJsonSync(STORE_FILE) as StoreEnvelope;
+    const envelope = fs.readJsonSync(storeFile) as StoreEnvelope;
     if (!envelope.records || typeof envelope.records !== 'object') {
       return { version: '1.0.0', records: {} };
     }
@@ -97,8 +99,8 @@ function loadStore(): StoreEnvelope {
 }
 
 function saveStore(envelope: StoreEnvelope): void {
-  fs.ensureDirSync(CLAWREINS_DATA_DIR);
-  fs.writeJsonSync(STORE_FILE, envelope, { spaces: 2 });
+  fs.ensureDirSync(getReinsDataDir());
+  fs.writeJsonSync(getPreferredDataPath('browser-sessions.json'), envelope, { spaces: 2 });
 }
 
 function extractHost(params: Record<string, unknown>): string | undefined {

@@ -5,19 +5,19 @@ import os from 'node:os';
 import path from 'node:path';
 import { mkdtempSync, mkdirSync } from 'node:fs';
 
-const openclawHome = mkdtempSync(path.join(os.tmpdir(), 'clawreins-policy-tests-'));
+const openclawHome = mkdtempSync(path.join(os.tmpdir(), 'reins-policy-tests-'));
 mkdirSync(openclawHome, { recursive: true });
 process.env.OPENCLAW_HOME = openclawHome;
 // Disable destructive gating so classifier doesn't override policy decisions
-process.env.CLAWREINS_DESTRUCTIVE_GATING = 'off';
+process.env.REINS_DESTRUCTIVE_GATING = 'off';
 
 const require = createRequire(import.meta.url);
 const { Interceptor } = require('../dist/core/Interceptor.js');
 const { createToolCallHook } = require('../dist/plugin/tool-interceptor.js');
 
 // Temp dirs used as stand-ins for real paths — no real directories assumed
-const allowedDir = mkdtempSync(path.join(os.tmpdir(), 'clawreins-allowed-'));
-const outsideDir = mkdtempSync(path.join(os.tmpdir(), 'clawreins-outside-'));
+const allowedDir = mkdtempSync(path.join(os.tmpdir(), 'reins-allowed-'));
+const outsideDir = mkdtempSync(path.join(os.tmpdir(), 'reins-outside-'));
 const secretsDir = path.join(allowedDir, 'secrets');
 const allowedFile = path.join(allowedDir, 'output.txt');
 const outsideFile = path.join(outsideDir, 'other.txt');

@@ -1,23 +1,18 @@
 /**
- * ClawReins Logger
+ * Reins logger
  * Production-grade logging with Winston
  */
 
 import winston from 'winston';
-import path from 'path';
-import { existsSync, mkdirSync } from 'fs';
-import os from 'os';
+import {
+  ensurePreferredDataDirSync,
+  getPreferredDataPath,
+  resolveDataDir,
+} from './data-dir';
 
-// Determine ClawReins home directory
-const OPENCLAW_HOME = process.env.OPENCLAW_HOME || path.join(os.homedir(), '.openclaw');
-const CLAWREINS_HOME = path.join(OPENCLAW_HOME, 'clawreins');
+ensurePreferredDataDirSync();
 
-// Ensure the clawreins directory exists
-if (!existsSync(CLAWREINS_HOME)) {
-  mkdirSync(CLAWREINS_HOME, { recursive: true });
-}
-
-const LOG_FILE = path.join(CLAWREINS_HOME, 'clawreins.log');
+const LOG_FILE = getPreferredDataPath('reins.log');
 
 export const logger = winston.createLogger({
   level: process.env.LOG_LEVEL || 'info',
@@ -26,7 +21,7 @@ export const logger = winston.createLogger({
     winston.format.errors({ stack: true }),
     winston.format.json()
   ),
-  defaultMeta: { service: 'clawreins' },
+  defaultMeta: { service: 'reins' },
   transports: [
     // Console transport (colorized for development)
     new winston.transports.Console({
@@ -51,4 +46,5 @@ export const logger = winston.createLogger({
 
 // Export the log file path for reference
 export const LOG_PATH = LOG_FILE;
-export const CLAWREINS_DATA_DIR = CLAWREINS_HOME;
+export const REINS_DATA_DIR = resolveDataDir();
+export const CLAWREINS_DATA_DIR = REINS_DATA_DIR;

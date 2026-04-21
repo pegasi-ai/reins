@@ -1,0 +1,14 @@
+#!/bin/sh
+# Reins PreToolUse hook — wrapper for the globally installed @pegasi/reins package.
+# Requires: npm install -g @pegasi/reins
+set -e
+
+REINS_ROOT="$(npm root -g 2>/dev/null)/@pegasi/reins"
+HOOK="$REINS_ROOT/dist/hooks/pre-tool-use.js"
+
+if [ ! -f "$HOOK" ]; then
+  echo '{"decision":"WARN","reason":"Reins not installed. Run: npm install -g @pegasi/reins && reins init"}' >&2
+  exit 0
+fi
+
+exec node "$HOOK"

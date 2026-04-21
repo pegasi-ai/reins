@@ -24,8 +24,8 @@ function isInsidePath(targetPath, rootPath) {
   return relative === '' || (!relative.startsWith('..') && !path.isAbsolute(relative));
 }
 
-test('clawreins configure --non-interactive --json succeeds in temp OPENCLAW_HOME', () => {
-  const tempRoot = mkdtempSync(path.join(os.tmpdir(), 'clawreins-configure-success-'));
+test('reins configure --non-interactive --json succeeds in temp OPENCLAW_HOME', () => {
+  const tempRoot = mkdtempSync(path.join(os.tmpdir(), 'reins-configure-success-'));
   const openclawHome = path.join(tempRoot, 'openclaw-home');
   const openclawConfig = path.join(openclawHome, 'openclaw.json');
 
@@ -34,8 +34,8 @@ test('clawreins configure --non-interactive --json succeeds in temp OPENCLAW_HOM
   const result = runCli(['configure', '--non-interactive', '--json'], {
     OPENCLAW_HOME: openclawHome,
     OPENCLAW_CONFIG: openclawConfig,
-    OPENCLAW_PLUGIN_ID: 'clawreins',
-    OPENCLAW_PLUGIN_DIR: path.join(openclawHome, 'extensions', 'clawreins'),
+    OPENCLAW_PLUGIN_ID: 'reins',
+    OPENCLAW_PLUGIN_DIR: path.join(openclawHome, 'extensions', 'reins'),
     LOG_LEVEL: 'error',
   });
 
@@ -55,8 +55,8 @@ test('clawreins configure --non-interactive --json succeeds in temp OPENCLAW_HOM
   assert.ok(isInsidePath(payload.configPath, openclawHome));
 });
 
-test('clawreins configure --non-interactive --json fails for custom security without modules', () => {
-  const tempRoot = mkdtempSync(path.join(os.tmpdir(), 'clawreins-configure-fail-'));
+test('reins configure --non-interactive --json fails for custom security without modules', () => {
+  const tempRoot = mkdtempSync(path.join(os.tmpdir(), 'reins-configure-fail-'));
   const openclawHome = path.join(tempRoot, 'openclaw-home');
   const openclawConfig = path.join(openclawHome, 'openclaw.json');
 

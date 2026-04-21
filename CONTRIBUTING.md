@@ -5,8 +5,8 @@ PRs welcome! Here's how to get started.
 ## Setup
 
 ```bash
-git clone https://github.com/YOUR_USERNAME/clawreins.git
-cd clawreins
+git clone https://github.com/YOUR_USERNAME/reins.git
+cd reins
 npm install
 npm run build
 ```

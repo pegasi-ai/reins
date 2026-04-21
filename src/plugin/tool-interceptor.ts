@@ -1,5 +1,5 @@
 /**
- * ClawReins Tool Interceptor
+ * Reins Tool Interceptor
  * Hook-based interception for OpenClaw's before_tool_call event
  */
 
@@ -22,7 +22,7 @@ import { DecisionLog } from '../storage/DecisionLog';
 import crypto from 'crypto';
 
 /**
- * Mapping from flat OpenClaw tool names to ClawReins module/method pairs.
+ * Mapping from flat OpenClaw tool names to Reins module/method pairs.
  */
 const TOOL_TO_MODULE: Record<string, { module: string; method: string }> = {
   // FileSystem
@@ -81,7 +81,7 @@ const TOOL_TO_MODULE: Record<string, { module: string; method: string }> = {
 
 const FORCE_ASK_IRREVERSIBILITY_THRESHOLD = 55;
 const EXPLICIT_CONFIRM_IRREVERSIBILITY_THRESHOLD = ((): number => {
-  const raw = process.env.CLAWREINS_CONFIRM_THRESHOLD;
+  const raw = process.env.REINS_CONFIRM_THRESHOLD || process.env.CLAWREINS_CONFIRM_THRESHOLD;
   const parsed = raw ? Number.parseInt(raw, 10) : NaN;
   return Number.isFinite(parsed) && parsed > 0 ? parsed : 80;
 })();
@@ -225,7 +225,7 @@ export function createToolCallHook(
       const reason =
         err instanceof Error
           ? err.message
-          : `${moduleName}.${methodName}() blocked by ClawReins policy`;
+          : `${moduleName}.${methodName}() blocked by Reins policy`;
       logger.warn(`Blocking ${toolName}: ${reason}`);
       if (destructiveClassification?.isDestructive) {
         logInterceptEvent({
@@ -251,7 +251,7 @@ export function createToolCallHook(
         error: unexpectedErr,
         toolName,
       });
-      return { block: true, blockReason: `ClawReins: unexpected hook error (fail-closed)` };
+      return { block: true, blockReason: `Reins: unexpected hook error (fail-closed)` };
     }
   };
 }
@@ -395,7 +395,7 @@ function buildDestructiveSummary(
   classification: DestructiveClassification
 ): string {
   const lines = [
-    `⚠ CLAWREINS INTERCEPT (${classification.severity})`,
+    `⚠ REINS INTERCEPT (${classification.severity})`,
     `Tool: ${moduleName}.${methodName}`,
   ];
 

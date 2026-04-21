@@ -1,5 +1,5 @@
 /**
- * ClawReins Security Scanner
+ * Reins Security Scanner
  * Audits local OpenClaw-style installations for common security misconfigurations.
  */
 
@@ -7,6 +7,7 @@ import { constants as FsConstants } from 'fs';
 import fs from 'fs-extra';
 import os from 'os';
 import path from 'path';
+import { getDataPath } from './data-dir';
 
 export interface ScanCheck {
   id: string;
@@ -156,7 +157,7 @@ export class SecurityScanner {
     this.cwd = process.cwd();
     this.openclawHome = process.env.OPENCLAW_HOME || path.join(this.userHome, '.openclaw');
     this.openclawConfigPath = process.env.OPENCLAW_CONFIG || path.join(this.openclawHome, 'openclaw.json');
-    this.policyPath = path.join(this.openclawHome, 'clawreins', 'policy.json');
+    this.policyPath = getDataPath('policy.json');
   }
 
   async run(): Promise<ScanReport> {

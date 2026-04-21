@@ -1,7 +1,7 @@
 /**
- * ClawReins Upgrade/Update Command
+ * Reins Upgrade/Update Command
  *
- * Goal: one command to reinstall the latest ClawReins plugin build in OpenClaw.
+ * Goal: one command to reinstall the latest Reins plugin build in OpenClaw.
  */
 
 import chalk from 'chalk';
@@ -67,7 +67,7 @@ export async function upgradeCommand(options: UpgradeCommandOptions = {}): Promi
 
     console.log('');
     console.log(chalk.bold.cyan('═'.repeat(80)));
-    console.log(chalk.bold.cyan(`   🔄 ClawReins Update (${packageSpec})`));
+    console.log(chalk.bold.cyan(`   🔄 Reins Update (${packageSpec})`));
     console.log(chalk.bold.cyan('═'.repeat(80)));
     console.log('');
 
@@ -92,7 +92,7 @@ export async function upgradeCommand(options: UpgradeCommandOptions = {}): Promi
 
     // Step 3: Optional reconfigure
     if (options.configure) {
-      console.log(chalk.bold('Step 3: Running ClawReins configure wizard...'));
+      console.log(chalk.bold('Step 3: Running Reins configure wizard...'));
       await initWizard();
       console.log(chalk.green('✅ Configure completed'));
       console.log('');
@@ -111,13 +111,13 @@ export async function upgradeCommand(options: UpgradeCommandOptions = {}): Promi
     }
 
     console.log('');
-    console.log(chalk.bold.green('ClawReins update complete.'));
+    console.log(chalk.bold.green('Reins update complete.'));
     if (!options.configure) {
-      console.log(chalk.dim('If needed, run: clawreins configure'));
+      console.log(chalk.dim('If needed, run: reins configure'));
     }
     console.log('');
   } catch (error) {
-    console.error(chalk.red('❌ ClawReins update failed:'), error);
+    console.error(chalk.red('❌ Reins update failed:'), error);
     logger.error('Upgrade command failed', { error });
     process.exit(1);
   }

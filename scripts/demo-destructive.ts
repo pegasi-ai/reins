@@ -2,13 +2,13 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 
-process.env.CLAWREINS_DESTRUCTIVE_GATING = 'on';
-process.env.CLAWREINS_BULK_THRESHOLD = '20';
-process.env.OPENCLAW_HOME = fs.mkdtempSync(path.join(os.tmpdir(), 'clawreins-demo-'));
+process.env.REINS_DESTRUCTIVE_GATING = 'on';
+process.env.REINS_BULK_THRESHOLD = '20';
+process.env.OPENCLAW_HOME = fs.mkdtempSync(path.join(os.tmpdir(), 'reins-demo-'));
 
 async function run(): Promise<void> {
   const { Interceptor } = await import('../src/core/Interceptor');
-  const { createToolCallHook, CLAWREINS_RESPOND_TOOL } = await import('../src/plugin/tool-interceptor');
+  const { createToolCallHook } = await import('../src/plugin/tool-interceptor');
 
   const interceptor = new Interceptor({
     defaultAction: 'ALLOW',
@@ -42,11 +42,11 @@ async function run(): Promise<void> {
 
   const yes = await hook(
     {
-      toolName: CLAWREINS_RESPOND_TOOL,
+      toolName: 'reins.respond',
       params: { decision: 'yes' },
     },
     {
-      toolName: CLAWREINS_RESPOND_TOOL,
+      toolName: 'reins.respond',
       sessionKey,
     }
   );
@@ -56,11 +56,11 @@ async function run(): Promise<void> {
 
   const confirm = await hook(
     {
-      toolName: CLAWREINS_RESPOND_TOOL,
+      toolName: 'reins.respond',
       params: { decision: 'confirm', confirmation: token },
     },
     {
-      toolName: CLAWREINS_RESPOND_TOOL,
+      toolName: 'reins.respond',
       sessionKey,
     }
   );

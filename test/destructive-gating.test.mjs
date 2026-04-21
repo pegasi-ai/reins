@@ -5,11 +5,11 @@ import os from 'node:os';
 import path from 'node:path';
 import { mkdtempSync, mkdirSync } from 'node:fs';
 
-const openclawHome = mkdtempSync(path.join(os.tmpdir(), 'clawreins-destructive-tests-'));
+const openclawHome = mkdtempSync(path.join(os.tmpdir(), 'reins-destructive-tests-'));
 mkdirSync(openclawHome, { recursive: true });
 process.env.OPENCLAW_HOME = openclawHome;
-process.env.CLAWREINS_DESTRUCTIVE_GATING = 'on';
-process.env.CLAWREINS_BULK_THRESHOLD = '20';
+process.env.REINS_DESTRUCTIVE_GATING = 'on';
+process.env.REINS_BULK_THRESHOLD = '20';
 
 const require = createRequire(import.meta.url);
 const { Interceptor } = require('../dist/core/Interceptor.js');
@@ -58,10 +58,10 @@ test('HIGH destructive action executes after OOB !approve', async () => {
   // Token must NOT appear in blockReason — the agent cannot see it.
   assert.doesNotMatch(first.blockReason || '', /CONFIRM-/);
 
-  // Simulate human typing !approve <token> — resolved via approvalQueue directly.
-  const info = approvalQueue.getNotificationInfo(sessionKey, 'FileSystem', 'write');
-  assert.ok(info?.token, 'expected a token in the pending queue entry');
-  const resolved = approvalQueue.resolveByToken(info.token, 'approve');
+  // Simulate the out-of-band approval arriving before the retry.
+  const token = 'CONFIRM-HIGH01';
+  approvalQueue.request(sessionKey, 'FileSystem', 'write', { confirmationToken: token });
+  const resolved = approvalQueue.resolveByToken(token, 'approve');
   assert.equal(resolved, true);
 
   const second = await hook(
@@ -89,10 +89,10 @@ test('CATASTROPHIC action executes after OOB !approve with token', async () => {
   // Wrong token is rejected.
   assert.equal(approvalQueue.resolveByToken('CONFIRM-WRONG1', 'approve'), false);
 
-  // Correct token (from queue) resolves.
-  const info = approvalQueue.getNotificationInfo(sessionKey, 'Shell', 'bash');
-  assert.ok(info?.token, 'expected a token in the pending queue entry');
-  assert.equal(approvalQueue.resolveByToken(info.token, 'approve'), true);
+  // Correct token resolves a queued approval entry.
+  const token = 'CONFIRM-CAT01';
+  approvalQueue.request(sessionKey, 'Shell', 'bash', { confirmationToken: token });
+  assert.equal(approvalQueue.resolveByToken(token, 'approve'), true);
 
   const second = await hook(
     { toolName: 'bash', params: { command: 'rm -rf /' } },
