@@ -8,6 +8,8 @@
   "homepage": "https://app.pegasi.ai",
   "repository": "https://github.com/pegasi-ai/reins",
   "license": "Apache-2.0",
+  "skills": "./skills",
+  "hooks": "./hooks/hooks.json",
   "keywords": [
     "security",
     "ai-agents",
