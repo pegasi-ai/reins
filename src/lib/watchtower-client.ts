@@ -37,6 +37,46 @@ export interface PolicyBundle {
   updated_at: string;
 }
 
+export interface SignupCliResult {
+  api_key: string;
+  dashboard_url: string;
+  message: string;
+}
+
+/**
+ * POST /api/auth/signup-cli — creates or signs in a user by email and returns
+ * a fresh API key + magic-link dashboard URL. No prior key needed.
+ */
+export async function signupCli(
+  email: string,
+  baseUrl: string
+): Promise<SignupCliResult> {
+  const url = buildWatchtowerUrl(baseUrl, '/api/auth/signup-cli');
+  const { status, body } = await nodeRequest(
+    'POST',
+    url,
+    {},
+    JSON.stringify({ email }),
+    15_000
+  );
+
+  if (status < 200 || status >= 300) {
+    throw new Error(`Reins Cloud signup failed: HTTP ${status} — ${body.trim()}`);
+  }
+
+  const raw = JSON.parse(body) as unknown;
+  const p = raw && typeof raw === 'object' ? (raw as Record<string, unknown>) : {};
+  const api_key = typeof p['api_key'] === 'string' ? p['api_key'] : '';
+  const dashboard_url = typeof p['dashboard_url'] === 'string' ? p['dashboard_url'] : baseUrl;
+  const message = typeof p['message'] === 'string' ? p['message'] : '';
+
+  if (!api_key) {
+    throw new Error('Reins Cloud signup returned no API key.');
+  }
+
+  return { api_key, dashboard_url, message };
+}
+
 export interface RunStartPayload {
   hostname: string;
   cwd: string;
@@ -72,14 +112,14 @@ export function buildWatchtowerUrl(baseUrl: string, urlPath: string): string {
   try {
     parsed = new URL(baseUrl);
   } catch {
-    throw new Error(`Invalid Watchtower base URL: ${baseUrl}`);
+    throw new Error(`Invalid Reins Cloud base URL: ${baseUrl}`);
   }
 
   if (
     parsed.protocol !== 'https:' &&
     !(parsed.protocol === 'http:' && isLoopbackHost(parsed.hostname))
   ) {
-    throw new Error('Watchtower base URL must use HTTPS (or http://localhost).');
+    throw new Error('Reins Cloud base URL must use HTTPS (or http://localhost).');
   }
 
   parsed.pathname = `${parsed.pathname.replace(/\/+$/, '')}${urlPath}`;
@@ -170,12 +210,12 @@ export async function validateApiKey(
   );
 
   if (status < 200 || status >= 300) {
-    throw new Error(`Watchtower key validation failed: HTTP ${status} — ${body.trim()}`);
+    throw new Error(`Reins Cloud key validation failed: HTTP ${status} — ${body.trim()}`);
   }
 
   const payload = JSON.parse(body) as unknown;
   if (!payload || typeof payload !== 'object') {
-    throw new Error('Watchtower key validation returned an unexpected response.');
+    throw new Error('Reins Cloud key validation returned an unexpected response.');
   }
   const p = payload as Record<string, unknown>;
   return {

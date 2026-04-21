@@ -1,12 +1,11 @@
 {
   "name": "@pegasi-ai/reins",
-  "version": "0.0.1",
+  "version": "0.0.14",
   "description": "Reins — runtime security and policy enforcement for Claude Code, OpenClaw, and other AI agents.",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "bin": {
-    "reins": "./dist/cli/index.js",
-    "clawreins": "./dist/cli/index.js"
+    "reins": "./dist/cli/index.js"
   },
   "scripts": {
     "build": "tsc",
@@ -38,7 +37,6 @@
     "commander": "^11.1.0",
     "fs-extra": "^11.2.0",
     "inquirer": "^9.2.12",
-    "scarf": "^0.0.10",
     "winston": "^3.11.0"
   },
   "devDependencies": {

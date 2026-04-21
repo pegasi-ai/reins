@@ -43,10 +43,6 @@ Or clone the repo — the skill is included at `.claude/skills/reins/` automatic
 
 An OpenClaw agent tries to bulk-delete 4,382 Gmail messages. Reins blocks it before execution.
 
-## In The News
-
-- TechCrunch (February 23, 2026): [A Meta AI security researcher said an OpenClaw agent ran amok on her inbox](https://techcrunch.com/2026/02/23/a-meta-ai-security-researcher-said-an-openclaw-agent-ran-amok-on-her-inbox/)
-
 ## What Reins does
 
 - **Prevent** — Block destructive actions before execution. Score irreversibility. Detect risky browser state.
@@ -63,16 +59,16 @@ An OpenClaw agent tries to bulk-delete 4,382 Gmail messages. Reins blocks it bef
 
 ## Documentation
 
-Full docs at [docs/](./docs/):
+Full docs at [reins.sh/docs](https://reins.sh/docs):
 
-- [Getting Started](./docs/pages/getting-started.mdx)
-- [How It Works](./docs/pages/how-it-works.mdx)
-- [Security Policies](./docs/pages/policies.mdx)
-- [CLI Reference](./docs/pages/cli.mdx)
-- [Security Scan](./docs/pages/scan.mdx)
-- [Watchtower](./docs/pages/watchtower.mdx)
-- [Use as a Library](./docs/pages/library.mdx)
-- [Architecture](./docs/pages/architecture.mdx)
+- [Getting Started](https://reins.sh/docs/getting-started)
+- [How It Works](https://reins.sh/docs/how-it-works)
+- [Security Policies](https://reins.sh/docs/policies)
+- [CLI Reference](https://reins.sh/docs/cli)
+- [Security Scan](https://reins.sh/docs/scan)
+- [Reins Cloud](https://reins.sh/docs/reins-cloud)
+- [Use as a Library](https://reins.sh/docs/library)
+- [Architecture](https://reins.sh/docs/architecture)
 
 ## Contributing
 

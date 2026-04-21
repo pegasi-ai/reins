@@ -21,8 +21,8 @@ import { getProtectedModules } from '../plugin/tool-interceptor';
 import { syncToolShieldDefaults } from '../toolshield/sync';
 import { runSetupScan } from './scan';
 import { installWatchtowerSchedule, supportsScheduledScans } from './scheduler';
-import { resolveWatchtowerCredentials, saveWatchtowerSettings } from '../storage/WatchtowerConfig';
-import { validateApiKey, fetchPolicies, fetchShellPolicies } from '../lib/watchtower-client';
+import { resolveWatchtowerCredentials, saveWatchtowerSettings, DEFAULT_WATCHTOWER_BASE_URL } from '../storage/WatchtowerConfig';
+import { signupCli, validateApiKey, fetchPolicies, fetchShellPolicies } from '../lib/watchtower-client';
 import { installClaudeCodeHooks } from '../lib/hook-installer';
 
 type SecurityLevel = 'permissive' | 'balanced' | 'strict' | 'custom';
@@ -234,7 +234,7 @@ async function maybeOfferWatchtowerSchedule(): Promise<string | null> {
   }
 
   console.log('');
-  console.log(chalk.green('✅ Connected to Watchtower!'));
+  console.log(chalk.green('✅ Connected to Reins Cloud!'));
   console.log('');
 
   const { enableSchedule } = await inquirer.prompt([
@@ -253,12 +253,12 @@ async function maybeOfferWatchtowerSchedule(): Promise<string | null> {
   const result = await installWatchtowerSchedule();
   if (result.alreadyInstalled) {
     console.log('');
-    console.log(chalk.green('✅ Daily scan is already scheduled at 9am. Results upload to Watchtower automatically.'));
+    console.log(chalk.green('✅ Daily scan is already scheduled at 9am. Results upload to Reins Cloud automatically.'));
     return result.descriptor;
   }
 
   console.log('');
-  console.log(chalk.green('✅ Daily scan scheduled at 9am. Results upload to Watchtower automatically.'));
+  console.log(chalk.green('✅ Daily scan scheduled at 9am. Results upload to Reins Cloud automatically.'));
   return result.descriptor;
 }
 
@@ -491,54 +491,57 @@ export async function initWizard(options: InitWizardOptions = {}): Promise<InitS
     const { connectWatchtower } = await inquirer.prompt([{
       type: 'confirm',
       name: 'connectWatchtower',
-      message: '📡 Connect to Watchtower for centralized policy governance?',
+      message: '📡 Connect to Reins Cloud for centralized policy enforcement & observability?',
       default: false,
     }]);
 
     if (connectWatchtower) {
-      const { apiKey } = await inquirer.prompt([{
-        type: 'password',
-        name: 'apiKey',
-        message: 'Watchtower API key (wt_...):',
-        validate: (v: string) => v.trim().length > 0 || 'API key is required',
+      const { email } = await inquirer.prompt([{
+        type: 'input',
+        name: 'email',
+        message: 'Your email address:',
+        validate: (v: string) => v.trim().length > 0 || 'Email is required',
       }]);
 
-      const { baseUrl } = await inquirer.prompt([{
-        type: 'input',
-        name: 'baseUrl',
-        message: 'Watchtower URL:',
-        default: 'https://app.pegasi.ai',
-      }]);
+      const baseUrl = DEFAULT_WATCHTOWER_BASE_URL;
 
       try {
-        const result = await validateApiKey(apiKey as string, baseUrl as string);
+        console.log(chalk.dim('  Connecting to Reins Cloud...'));
+        const signup = await signupCli(email as string, baseUrl);
+
+        const validation = await validateApiKey(signup.api_key, baseUrl);
         await saveWatchtowerSettings({
-          apiKey: apiKey as string,
-          baseUrl: baseUrl as string,
-          email: result.email,
-          org_id: result.org_id,
-          team_id: result.team_id,
-          device_id: result.device_id,
+          apiKey: signup.api_key,
+          baseUrl,
+          dashboardUrl: signup.dashboard_url,
+          email: email as string,
+          org_id: validation.org_id,
+          team_id: validation.team_id,
+          device_id: validation.device_id,
           connectedAt: new Date().toISOString(),
         });
 
         // Pull initial policies
-        const bundle = await fetchPolicies(apiKey as string, baseUrl as string);
+        const bundle = await fetchPolicies(signup.api_key, baseUrl);
         const policiesPath = path.join(REINS_DATA_DIR, 'policies.json');
         await fs.writeJson(policiesPath, bundle, { spaces: 2 });
 
         // Merge shell policies
-        const shellRules = await fetchShellPolicies(apiKey as string, baseUrl as string);
+        const shellRules = await fetchShellPolicies(signup.api_key, baseUrl);
         if (shellRules.length > 0) {
           bundle.shell_rules = [...bundle.shell_rules, ...shellRules];
           await fs.writeJson(policiesPath, bundle, { spaces: 2 });
         }
 
-        console.log(chalk.green(`✅ Connected to Watchtower (${result.email}, org: ${result.org_id})`));
+        console.log(chalk.green(`✅ Connected to Reins Cloud (${email})`));
+        if (signup.message) {
+          console.log(chalk.dim(`  ${signup.message}`));
+        }
+        console.log(chalk.dim(`  Dashboard: ${signup.dashboard_url}`));
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
-        warnings.push(`Watchtower connection failed: ${msg}`);
-        console.log(chalk.yellow(`⚠️  Watchtower connection failed: ${msg}`));
+        warnings.push(`Reins Cloud connection failed: ${msg}`);
+        console.log(chalk.yellow(`⚠️  Reins Cloud connection failed: ${msg}`));
       }
     }
 
