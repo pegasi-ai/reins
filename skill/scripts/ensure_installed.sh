@@ -5,8 +5,8 @@
 
 set -euo pipefail
 
-if command -v reins &> /dev/null || command -v clawreins &> /dev/null; then
-    CMD=$(command -v reins 2>/dev/null || command -v clawreins)
+if command -v reins &> /dev/null; then
+    CMD=$(command -v reins)
     echo "Reins is installed: $($CMD --version)"
     exit 0
 fi

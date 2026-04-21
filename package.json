@@ -1,6 +1,6 @@
 {
-  "name": "@pegasi/reins",
-  "version": "0.0.23",
+  "name": "@pegasi-ai/reins",
+  "version": "0.0.1",
   "description": "Reins — runtime security and policy enforcement for Claude Code, OpenClaw, and other AI agents.",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",

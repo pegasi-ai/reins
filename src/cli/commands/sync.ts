@@ -11,8 +11,9 @@ import { resolveWatchtowerCredentials } from '../../storage/WatchtowerConfig';
 import { fetchPolicies, fetchShellPolicies, flushDecisions, startRun, PolicyBundle } from '../../lib/watchtower-client';
 import { readPending, clearPending } from '../../lib/pending-queue';
 import { getCurrentRunId, saveCurrentRun } from '../../lib/run-manager';
+import { getPreferredDataPath } from '../../core/data-dir';
 
-const POLICIES_FILE = path.join(os.homedir(), '.openclaw', 'clawreins', 'policies.json');
+const POLICIES_FILE = getPreferredDataPath('policies.json');
 
 export async function syncCommand(): Promise<void> {
   console.log('');
@@ -25,7 +26,7 @@ export async function syncCommand(): Promise<void> {
 
   if (!creds) {
     console.log(chalk.yellow('⚠️  Not connected to Watchtower.'));
-    console.log(chalk.dim('  Connect with: reins init  or set CLAWREINS_WATCHTOWER_API_KEY'));
+    console.log(chalk.dim('  Connect with: reins init  or set REINS_WATCHTOWER_API_KEY'));
     return;
   }
 

@@ -4,10 +4,7 @@
  */
 
 import fs from 'fs';
-import path from 'path';
-import os from 'os';
-
-const CURRENT_RUN_FILE = path.join(os.homedir(), '.openclaw', 'clawreins', 'current_run.json');
+import { getDataPath, getPreferredDataPath, getReinsDataDir } from '../core/data-dir';
 
 interface CurrentRun {
   run_id: string;
@@ -15,9 +12,9 @@ interface CurrentRun {
 }
 
 function ensureRunDir(): void {
-  const dir = path.dirname(CURRENT_RUN_FILE);
-  if (!fs.existsSync(dir)) {
-    fs.mkdirSync(dir, { recursive: true });
+  const reinsDataDir = getReinsDataDir();
+  if (!fs.existsSync(reinsDataDir)) {
+    fs.mkdirSync(reinsDataDir, { recursive: true });
   }
 }
 
@@ -26,10 +23,11 @@ function ensureRunDir(): void {
  */
 export function getCurrentRunId(): string | null {
   try {
-    if (!fs.existsSync(CURRENT_RUN_FILE)) {
+    const currentRunFile = getDataPath('current_run.json');
+    if (!fs.existsSync(currentRunFile)) {
       return null;
     }
-    const raw = fs.readFileSync(CURRENT_RUN_FILE, 'utf8');
+    const raw = fs.readFileSync(currentRunFile, 'utf8');
     const parsed = JSON.parse(raw) as unknown;
     if (parsed && typeof parsed === 'object') {
       const r = parsed as Record<string, unknown>;
@@ -52,7 +50,7 @@ export function saveCurrentRun(run_id: string): void {
     run_id,
     started_at: new Date().toISOString(),
   };
-  fs.writeFileSync(CURRENT_RUN_FILE, JSON.stringify(entry, null, 2), 'utf8');
+  fs.writeFileSync(getPreferredDataPath('current_run.json'), JSON.stringify(entry, null, 2), 'utf8');
 }
 
 /**
@@ -60,8 +58,9 @@ export function saveCurrentRun(run_id: string): void {
  */
 export function clearCurrentRun(): void {
   try {
-    if (fs.existsSync(CURRENT_RUN_FILE)) {
-      fs.unlinkSync(CURRENT_RUN_FILE);
+    const currentRunFile = getDataPath('current_run.json');
+    if (fs.existsSync(currentRunFile)) {
+      fs.unlinkSync(currentRunFile);
     }
   } catch {
     // Ignore.

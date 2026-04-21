@@ -1,13 +1,11 @@
 /**
- * ClawReins StatsTracker
- * Tracks statistics about decisions (~/.openclaw/clawreins/stats.json)
+ * Reins StatsTracker
+ * Tracks statistics about decisions (~/.openclaw/reins/stats.json)
  */
 
 import fs from 'fs-extra';
-import path from 'path';
-import { CLAWREINS_DATA_DIR, logger } from '../core/Logger';
-
-const STATS_FILE = path.join(CLAWREINS_DATA_DIR, 'stats.json');
+import { logger } from '../core/Logger';
+import { getDataPath, getPreferredDataPath, getReinsDataDir } from '../core/data-dir';
 
 export interface Stats {
   totalCalls: number;
@@ -28,10 +26,11 @@ export class StatsTracker {
    */
   static async load(): Promise<Stats> {
     try {
-      await fs.ensureDir(CLAWREINS_DATA_DIR);
+      const statsFile = getDataPath('stats.json');
+      await fs.ensureDir(getReinsDataDir());
 
-      if (await fs.pathExists(STATS_FILE)) {
-        return await fs.readJson(STATS_FILE);
+      if (await fs.pathExists(statsFile)) {
+        return await fs.readJson(statsFile);
       } else {
         // Initialize with zeros
         const initialStats: Stats = {
@@ -57,8 +56,8 @@ export class StatsTracker {
    */
   static async save(stats: Stats): Promise<void> {
     try {
-      await fs.ensureDir(CLAWREINS_DATA_DIR);
-      await fs.writeJson(STATS_FILE, stats, { spaces: 2 });
+      await fs.ensureDir(getReinsDataDir());
+      await fs.writeJson(getPreferredDataPath('stats.json'), stats, { spaces: 2 });
     } catch (error) {
       logger.error('Failed to save stats', { error });
       throw error;
@@ -124,6 +123,6 @@ export class StatsTracker {
    * Get the stats file path
    */
   static getPath(): string {
-    return STATS_FILE;
+    return getPreferredDataPath('stats.json');
   }
 }

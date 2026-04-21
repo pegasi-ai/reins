@@ -4,17 +4,14 @@
  */
 
 import fs from 'fs';
-import path from 'path';
-import os from 'os';
 
 import type { PolicyDecision } from './watchtower-client';
-
-const PENDING_FILE = path.join(os.homedir(), '.openclaw', 'clawreins', 'pending.jsonl');
+import { getDataPath, getPreferredDataPath, getReinsDataDir } from '../core/data-dir';
 
 function ensurePendingDir(): void {
-  const dir = path.dirname(PENDING_FILE);
-  if (!fs.existsSync(dir)) {
-    fs.mkdirSync(dir, { recursive: true });
+  const reinsDataDir = getReinsDataDir();
+  if (!fs.existsSync(reinsDataDir)) {
+    fs.mkdirSync(reinsDataDir, { recursive: true });
   }
 }
 
@@ -25,7 +22,7 @@ function ensurePendingDir(): void {
 export function appendPending(entry: PolicyDecision): void {
   try {
     ensurePendingDir();
-    fs.appendFileSync(PENDING_FILE, JSON.stringify(entry) + '\n', 'utf8');
+    fs.appendFileSync(getPreferredDataPath('pending.jsonl'), JSON.stringify(entry) + '\n', 'utf8');
   } catch {
     // Intentionally swallow — pending queue must never crash the hook.
   }
@@ -37,10 +34,11 @@ export function appendPending(entry: PolicyDecision): void {
  */
 export function readPending(): PolicyDecision[] {
   try {
-    if (!fs.existsSync(PENDING_FILE)) {
+    const pendingFile = getDataPath('pending.jsonl');
+    if (!fs.existsSync(pendingFile)) {
       return [];
     }
-    const content = fs.readFileSync(PENDING_FILE, 'utf8');
+    const content = fs.readFileSync(pendingFile, 'utf8');
     const results: PolicyDecision[] = [];
     for (const line of content.split('\n')) {
       const trimmed = line.trim();
@@ -62,8 +60,9 @@ export function readPending(): PolicyDecision[] {
  */
 export function clearPending(): void {
   try {
-    if (fs.existsSync(PENDING_FILE)) {
-      fs.unlinkSync(PENDING_FILE);
+    const pendingFile = getDataPath('pending.jsonl');
+    if (fs.existsSync(pendingFile)) {
+      fs.unlinkSync(pendingFile);
     }
   } catch {
     // Ignore.
@@ -75,10 +74,11 @@ export function clearPending(): void {
  */
 export function pendingCount(): number {
   try {
-    if (!fs.existsSync(PENDING_FILE)) {
+    const pendingFile = getDataPath('pending.jsonl');
+    if (!fs.existsSync(pendingFile)) {
       return 0;
     }
-    const content = fs.readFileSync(PENDING_FILE, 'utf8');
+    const content = fs.readFileSync(pendingFile, 'utf8');
     return content
       .split('\n')
       .filter((line) => line.trim().length > 0).length;

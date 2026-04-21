@@ -3,14 +3,13 @@
  */
 
 import fs from 'fs';
-import path from 'path';
-import os from 'os';
 import chalk from 'chalk';
 
 import { hooksStatus } from '../../lib/hook-installer';
 import { resolveWatchtowerCredentials } from '../../storage/WatchtowerConfig';
 import { getCurrentRunId } from '../../lib/run-manager';
 import { pendingCount } from '../../lib/pending-queue';
+import { getDataPath } from '../../core/data-dir';
 
 interface PolicyCache {
   shell_rules?: unknown[];
@@ -20,7 +19,7 @@ interface PolicyCache {
 }
 
 function readPoliciesSync(): PolicyCache | null {
-  const policiesPath = path.join(os.homedir(), '.openclaw', 'clawreins', 'policies.json');
+  const policiesPath = getDataPath('policies.json');
   try {
     if (!fs.existsSync(policiesPath)) return null;
     const raw = fs.readFileSync(policiesPath, 'utf8');
@@ -47,7 +46,7 @@ function formatTimeSince(isoString: string): string {
 }
 
 function getPoliciesFileStat(): { mtime?: string } {
-  const policiesPath = path.join(os.homedir(), '.openclaw', 'clawreins', 'policies.json');
+  const policiesPath = getDataPath('policies.json');
   try {
     const stat = fs.statSync(policiesPath);
     return { mtime: stat.mtime.toISOString() };
@@ -105,7 +104,7 @@ export async function statusCommand(): Promise<void> {
     }
   } else {
     console.log(`  Connected:   ${chalk.red('❌ not connected')}`);
-    console.log(chalk.dim('  Connect during: reins init  or set CLAWREINS_WATCHTOWER_API_KEY'));
+    console.log(chalk.dim('  Connect during: reins init  or set REINS_WATCHTOWER_API_KEY'));
   }
 
   console.log('');

@@ -4,6 +4,7 @@ import fs from 'fs-extra';
 import os from 'os';
 import path from 'path';
 import { ScanCheck, ScanReport } from '../core/SecurityScanner';
+import { getDataPath, getPreferredDataPath } from '../core/data-dir';
 
 export type JsonValue = null | boolean | number | string | JsonValue[] | { [key: string]: JsonValue };
 
@@ -34,7 +35,7 @@ export interface DriftComparison {
 export interface WatchtowerScanArtifact {
   artifact_version: '1.0.0';
   source: {
-    producer: 'clawreins';
+    producer: 'reins';
     integration: 'openclaw';
     command: string;
     mode: 'plain' | 'monitor';
@@ -89,7 +90,7 @@ export interface WatchtowerScanArtifact {
       config_path: null;
       policy_path: null;
     };
-    clawreins: {
+    reins: {
       state_path: null;
       config_baseline_path: null;
     };
@@ -172,15 +173,15 @@ export function getOpenclawConfigPath(): string {
 }
 
 export function getScanStatePath(): string {
-  return path.join(getOpenclawHomePath(), 'clawreins', 'scan-state.json');
+  return getDataPath('scan-state.json');
 }
 
 export function getConfigBaselinePath(): string {
-  return path.join(getOpenclawHomePath(), 'clawreins', 'config-base.json');
+  return getDataPath('config-base.json');
 }
 
 function getWatchtowerArtifactPath(): string {
-  return path.join(getOpenclawHomePath(), 'clawreins', 'watchtower-scan-artifact.json');
+  return getPreferredDataPath('watchtower-scan-artifact.json');
 }
 
 export function buildWatchtowerArtifact(
@@ -194,7 +195,7 @@ export function buildWatchtowerArtifact(
   return {
     artifact_version: WATCHTOWER_ARTIFACT_VERSION,
     source: {
-      producer: 'clawreins',
+      producer: 'reins',
       integration: 'openclaw',
       command,
       mode: monitorEnabled ? 'monitor' : 'plain',
@@ -253,7 +254,7 @@ export function buildWatchtowerArtifact(
         config_path: null,
         policy_path: null,
       },
-      clawreins: {
+      reins: {
         state_path: null,
         config_baseline_path: null,
       },

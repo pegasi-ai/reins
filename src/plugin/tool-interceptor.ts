@@ -81,7 +81,7 @@ const TOOL_TO_MODULE: Record<string, { module: string; method: string }> = {
 
 const FORCE_ASK_IRREVERSIBILITY_THRESHOLD = 55;
 const EXPLICIT_CONFIRM_IRREVERSIBILITY_THRESHOLD = ((): number => {
-  const raw = process.env.CLAWREINS_CONFIRM_THRESHOLD;
+  const raw = process.env.REINS_CONFIRM_THRESHOLD || process.env.CLAWREINS_CONFIRM_THRESHOLD;
   const parsed = raw ? Number.parseInt(raw, 10) : NaN;
   return Number.isFinite(parsed) && parsed > 0 ? parsed : 80;
 })();
@@ -395,7 +395,7 @@ function buildDestructiveSummary(
   classification: DestructiveClassification
 ): string {
   const lines = [
-    `⚠ CLAWREINS INTERCEPT (${classification.severity})`,
+    `⚠ REINS INTERCEPT (${classification.severity})`,
     `Tool: ${moduleName}.${methodName}`,
   ];
 

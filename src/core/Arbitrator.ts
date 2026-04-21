@@ -169,7 +169,7 @@ export class Arbitrator {
     console.log('');
     console.log(chalk.bgRed.white.bold('═'.repeat(80)));
     console.log(
-      chalk.bgRed.white.bold('   🦞 CLAWREINS SECURITY ALERT - HUMAN AUTHORIZATION REQUIRED')
+      chalk.bgRed.white.bold('   🪢 REINS SECURITY ALERT - HUMAN AUTHORIZATION REQUIRED')
     );
     console.log(chalk.bgRed.white.bold('═'.repeat(80)));
     console.log('');

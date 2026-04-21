@@ -10,8 +10,14 @@
 import { readFileSync, appendFileSync, mkdirSync, existsSync } from 'fs';
 import path from 'path';
 import os from 'os';
+import {
+  getDataPath,
+  getLegacyClawreinsDataDir,
+  getPreferredDataPath,
+  getReinsDataDir,
+} from '../core/data-dir';
 
-const DECISIONS_FILE = path.join(os.homedir(), '.openclaw', 'clawreins', 'decisions.jsonl');
+const DECISIONS_FILE = getPreferredDataPath('decisions.jsonl');
 
 function writeToAuditLog(entry: Record<string, unknown>): void {
   try {
@@ -57,7 +63,8 @@ const DEFAULT_PROTECTED_PATHS = [
   path.join(os.homedir(), '.ssh'),
   path.join(os.homedir(), '.gnupg'),
   path.join(os.homedir(), '.env'),
-  path.join(os.homedir(), '.openclaw', 'clawreins'),
+  getReinsDataDir(),
+  getLegacyClawreinsDataDir(),
   '/etc/passwd',
   '/etc/shadow',
 ];
@@ -154,7 +161,7 @@ function evaluateMcpTool(toolName: string, mcpRules: McpRule[]): EvalResult {
 // ─── Load cached policies synchronously ─────────────────────────────────────
 
 function loadCachedPolicies(): PolicyCache {
-  const policiesPath = path.join(os.homedir(), '.openclaw', 'clawreins', 'policies.json');
+  const policiesPath = getDataPath('policies.json');
   try {
     const raw = readFileSync(policiesPath, 'utf8');
     const parsed = JSON.parse(raw) as unknown;

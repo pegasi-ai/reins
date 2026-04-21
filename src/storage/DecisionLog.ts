@@ -1,13 +1,11 @@
 /**
- * ClawReins DecisionLog
- * Audit trail in JSON Lines format (~/.openclaw/clawreins/decisions.jsonl)
+ * Reins DecisionLog
+ * Audit trail in JSON Lines format (~/.openclaw/reins/decisions.jsonl)
  */
 
 import fs from 'fs-extra';
-import path from 'path';
-import { CLAWREINS_DATA_DIR, logger } from '../core/Logger';
-
-const DECISIONS_FILE = path.join(CLAWREINS_DATA_DIR, 'decisions.jsonl');
+import { logger } from '../core/Logger';
+import { getDataPath, getPreferredDataPath, getReinsDataDir } from '../core/data-dir';
 
 export interface DecisionRecord {
   timestamp: string;
@@ -43,11 +41,12 @@ export class DecisionLog {
    */
   static async append(record: DecisionRecord): Promise<void> {
     try {
-      await fs.ensureDir(CLAWREINS_DATA_DIR);
+      const decisionsFile = getPreferredDataPath('decisions.jsonl');
+      await fs.ensureDir(getReinsDataDir());
 
       // Append as JSON Lines (one JSON object per line)
       const line = JSON.stringify(record) + '\n';
-      await fs.appendFile(DECISIONS_FILE, line, 'utf8');
+      await fs.appendFile(decisionsFile, line, 'utf8');
 
       logger.debug('Decision logged', { decision: record.decision, module: record.module });
     } catch (error) {
@@ -61,11 +60,12 @@ export class DecisionLog {
    */
   static async readAll(): Promise<DecisionRecord[]> {
     try {
-      if (!(await fs.pathExists(DECISIONS_FILE))) {
+      const decisionsFile = getDataPath('decisions.jsonl');
+      if (!(await fs.pathExists(decisionsFile))) {
         return [];
       }
 
-      const content = await fs.readFile(DECISIONS_FILE, 'utf8');
+      const content = await fs.readFile(decisionsFile, 'utf8');
       const lines = content.trim().split('\n').filter(Boolean);
 
       return lines.map((line) => JSON.parse(line));
@@ -87,6 +87,6 @@ export class DecisionLog {
    * Get the decision log file path
    */
   static getPath(): string {
-    return DECISIONS_FILE;
+    return getPreferredDataPath('decisions.jsonl');
   }
 }

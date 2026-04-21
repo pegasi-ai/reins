@@ -7,7 +7,7 @@ description: Use this skill whenever security, policies, governance, guardrails,
 
 Reins enforces deterministic security policies on every agent action via Claude Code. PreToolUse and PostToolUse hooks. Policies are pulled from Watchtower (app.pegasi.ai) and evaluated in <50ms with no LLM in the enforcement path.
 
-`clawreins` is the legacy alias — both work.
+Use `reins` for all commands and paths.
 
 ## Step 1: Verify installation
 
@@ -39,7 +39,7 @@ npm install -g @pegasi/reins && reins init
 | `0` + JSON `decision: WARN` | WARNING — elevated risk | Acknowledge the warning. Proceed with extra caution. |
 
 **PostToolUse** fires after every action (non-blocking). It appends a JSONL entry to
-`~/.openclaw/clawreins/decisions.jsonl` and queues it for Watchtower batch upload.
+`~/.openclaw/reins/decisions.jsonl` and queues it for Watchtower batch upload.
 
 ## What gets enforced
 
@@ -52,7 +52,7 @@ npm install -g @pegasi/reins && reins init
 
 **File operations (Edit / MultiEdit / Write)**
 - Writes blocked to protected paths: `~/.ssh`, `~/.gnupg`, `~/.env`,
-  `~/.openclaw/clawreins`, `/etc/passwd`, `/etc/shadow`
+  `~/.openclaw/reins`, `/etc/passwd`, `/etc/shadow`
 
 **MCP tool calls** (all MCP servers, caught by empty-matcher hook)
 - Blocked: Notion page delete, Gmail send (unapproved domains), database DROP/TRUNCATE
@@ -111,27 +111,27 @@ When connected, Watchtower provides:
 Connect during `reins init` (Step 7 prompts for API key) or set env vars:
 
 ```bash
-CLAWREINS_WATCHTOWER_API_KEY=wt_...
-CLAWREINS_WATCHTOWER_BASE_URL=https://app.pegasi.ai  # default
+REINS_WATCHTOWER_API_KEY=wt_...
+REINS_WATCHTOWER_BASE_URL=https://app.pegasi.ai  # default
 ```
 
-Config lives at `~/.openclaw/clawreins/config.json`.
+Config lives at `~/.openclaw/reins/config.json`.
 
 ## Policy merge order (highest to lowest priority)
 
 1. Watchtower org policies — CRITICAL rules are immutable
 2. Watchtower team policies
-3. Local overrides at `~/.openclaw/clawreins/policy.json`
+3. Local overrides at `~/.openclaw/reins/policy.json`
 4. Built-in defaults (balanced: reads ALLOW, writes ASK, deletes DENY)
 
 If Watchtower is unreachable, last-cached policies still enforce. Never fails open.
 
 ## Audit log
 
-Append-only JSONL at `~/.openclaw/clawreins/decisions.jsonl`:
+Append-only JSONL at `~/.openclaw/reins/decisions.jsonl`:
 
 ```json
 {"timestamp":"2026-04-15T22:39:42Z","module":"Shell","method":"bash","decision":"BLOCKED","reason":"critical: rm -rf /","tool":"Bash","decisionTime":12}
 ```
 
-View with `reins audit -n 50` or stream with `tail -f ~/.openclaw/clawreins/decisions.jsonl`.
+View with `reins audit -n 50` or stream with `tail -f ~/.openclaw/reins/decisions.jsonl`.

@@ -1,5 +1,5 @@
 <div align="center">
-  <img src="logo.png" alt="Reins Logo" width="360"/>
+  <img src="./public/reins_logo.png" alt="Reins Logo" width="360"/>
   <h1>🪢 Reins</h1>
   <p><strong>Security controls for AI agents.</strong></p>
 
@@ -39,7 +39,7 @@ Or clone the repo — the skill is included at `.claude/skills/reins/` automatic
 
 ## Demo
 
-![Reins demo](./public/clawreins-demo.gif)
+![Reins demo](./public/reins-demo.gif)
 
 An OpenClaw agent tries to bulk-delete 4,382 Gmail messages. Reins blocks it before execution.
 
@@ -59,7 +59,7 @@ An OpenClaw agent tries to bulk-delete 4,382 Gmail messages. Reins blocks it bef
 - **Synchronous** — agent cannot proceed until the hook exits
 - **No network in the hot path** — policies cached locally, enforced offline
 - **Fail-closed** — any unhandled hook error blocks the action
-- **Immutable audit** — append-only JSONL at `~/.openclaw/clawreins/decisions.jsonl`
+- **Immutable audit** — append-only JSONL at `~/.openclaw/reins/decisions.jsonl`
 
 ## Documentation
 

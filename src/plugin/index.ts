@@ -51,11 +51,11 @@ function getPackageVersion(): string {
 }
 
 export const ReinsManifest: ReinsPluginManifest = {
-  id: 'clawreins',
-  displayName: 'Clawreins',
+  id: 'reins',
+  displayName: 'Reins',
   version: getPackageVersion(),
   configure: {
-    command: 'clawreins configure',
+    command: 'reins configure',
   },
 };
 
@@ -191,11 +191,12 @@ export default {
       // OOB notifier: initialise with runtime send functions + gateway config
       // -------------------------------------------------------------------
       // OpenClaw passes the full openclaw.json as api.config; the plugin's own
-      // config section is nested at plugins.entries.clawreins.config.
+      // config section is nested at plugins.entries.reins.config.
       const globalConfig = api.config as {
-        plugins?: { entries?: { reins?: { config?: ReinsConfig } } };
+        plugins?: { entries?: { reins?: { config?: ReinsConfig }; clawreins?: { config?: ReinsConfig } } };
       } | undefined;
-      const pluginConfig = globalConfig?.plugins?.entries?.reins?.config;
+      const pluginConfig = globalConfig?.plugins?.entries?.reins?.config
+        || globalConfig?.plugins?.entries?.clawreins?.config;
       logger.info('[plugin] pluginConfig at init', { pluginConfig: JSON.stringify(pluginConfig) });
       initNotifier(api.runtime, api.config, pluginConfig?.fallbackChannel);
 

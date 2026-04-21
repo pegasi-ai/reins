@@ -1,0 +1,18 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      { "matcher": "Bash",      "hooks": [{ "type": "command", "command": "reins-pre-hook" }] },
+      { "matcher": "Edit",      "hooks": [{ "type": "command", "command": "reins-pre-hook" }] },
+      { "matcher": "MultiEdit", "hooks": [{ "type": "command", "command": "reins-pre-hook" }] },
+      { "matcher": "Write",     "hooks": [{ "type": "command", "command": "reins-pre-hook" }] },
+      { "matcher": "",          "hooks": [{ "type": "command", "command": "reins-pre-hook" }] }
+    ],
+    "PostToolUse": [
+      { "matcher": "Bash",      "hooks": [{ "type": "command", "command": "reins-post-hook" }] },
+      { "matcher": "Edit",      "hooks": [{ "type": "command", "command": "reins-post-hook" }] },
+      { "matcher": "MultiEdit", "hooks": [{ "type": "command", "command": "reins-post-hook" }] },
+      { "matcher": "Write",     "hooks": [{ "type": "command", "command": "reins-post-hook" }] },
+      { "matcher": "",          "hooks": [{ "type": "command", "command": "reins-post-hook" }] }
+    ]
+  }
+}

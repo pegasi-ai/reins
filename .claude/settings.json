@@ -6,7 +6,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node /Users/kevinwu/Documents/clawreins-public/clawreins/dist/hooks/pre-tool-use.js",
+            "command": "node /Users/kevinwu/Documents/clawreins-public/reins/dist/hooks/pre-tool-use.js",
             "_reins": true
           }
         ]
@@ -16,7 +16,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node /Users/kevinwu/Documents/clawreins-public/clawreins/dist/hooks/pre-tool-use.js",
+            "command": "node /Users/kevinwu/Documents/clawreins-public/reins/dist/hooks/pre-tool-use.js",
             "_reins": true
           }
         ]
@@ -26,7 +26,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node /Users/kevinwu/Documents/clawreins-public/clawreins/dist/hooks/pre-tool-use.js",
+            "command": "node /Users/kevinwu/Documents/clawreins-public/reins/dist/hooks/pre-tool-use.js",
             "_reins": true
           }
         ]
@@ -36,7 +36,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node /Users/kevinwu/Documents/clawreins-public/clawreins/dist/hooks/pre-tool-use.js",
+            "command": "node /Users/kevinwu/Documents/clawreins-public/reins/dist/hooks/pre-tool-use.js",
             "_reins": true
           }
         ]
@@ -46,7 +46,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node /Users/kevinwu/Documents/clawreins-public/clawreins/dist/hooks/pre-tool-use.js",
+            "command": "node /Users/kevinwu/Documents/clawreins-public/reins/dist/hooks/pre-tool-use.js",
             "_reins": true
           }
         ]
@@ -58,7 +58,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node /Users/kevinwu/Documents/clawreins-public/clawreins/dist/hooks/post-tool-use.js",
+            "command": "node /Users/kevinwu/Documents/clawreins-public/reins/dist/hooks/post-tool-use.js",
             "_reins": true
           }
         ]
@@ -68,7 +68,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node /Users/kevinwu/Documents/clawreins-public/clawreins/dist/hooks/post-tool-use.js",
+            "command": "node /Users/kevinwu/Documents/clawreins-public/reins/dist/hooks/post-tool-use.js",
             "_reins": true
           }
         ]
@@ -78,7 +78,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node /Users/kevinwu/Documents/clawreins-public/clawreins/dist/hooks/post-tool-use.js",
+            "command": "node /Users/kevinwu/Documents/clawreins-public/reins/dist/hooks/post-tool-use.js",
             "_reins": true
           }
         ]
@@ -88,7 +88,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node /Users/kevinwu/Documents/clawreins-public/clawreins/dist/hooks/post-tool-use.js",
+            "command": "node /Users/kevinwu/Documents/clawreins-public/reins/dist/hooks/post-tool-use.js",
             "_reins": true
           }
         ]
@@ -98,7 +98,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node /Users/kevinwu/Documents/clawreins-public/clawreins/dist/hooks/post-tool-use.js",
+            "command": "node /Users/kevinwu/Documents/clawreins-public/reins/dist/hooks/post-tool-use.js",
             "_reins": true
           }
         ]

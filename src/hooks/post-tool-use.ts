@@ -10,6 +10,7 @@
 import { readFileSync, appendFileSync, mkdirSync, existsSync } from 'fs';
 import path from 'path';
 import os from 'os';
+import { getPreferredDataPath } from '../core/data-dir';
 
 import { logPolicyDecision, PolicyDecision } from '../lib/watchtower-client';
 import { appendPending } from '../lib/pending-queue';
@@ -42,7 +43,7 @@ interface AuditEntry {
 
 // ─── Paths ───────────────────────────────────────────────────────────────────
 
-const DECISIONS_FILE = path.join(os.homedir(), '.openclaw', 'clawreins', 'decisions.jsonl');
+const DECISIONS_FILE = getPreferredDataPath('decisions.jsonl');
 
 function ensureDecisionsDir(): void {
   const dir = path.dirname(DECISIONS_FILE);

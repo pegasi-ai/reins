@@ -119,7 +119,7 @@ async function withCapturedConsole(run) {
 }
 
 test('SecurityScanner reports 13 checks and warns when primary config is missing', async () => {
-  const homeDir = makeTempRoot('clawreins-scan-home-');
+  const homeDir = makeTempRoot('reins-scan-home-');
   const openclawHome = path.join(homeDir, '.openclaw');
   mkdirSync(openclawHome, { recursive: true });
 
@@ -134,7 +134,7 @@ test('SecurityScanner reports 13 checks and warns when primary config is missing
 });
 
 test('SecurityScanner reports exposed configurations across the expanded scan set', async () => {
-  const homeDir = makeTempRoot('clawreins-scan-exposed-home-');
+  const homeDir = makeTempRoot('reins-scan-exposed-home-');
   const openclawHome = path.join(homeDir, '.openclaw');
 
   writeJson(path.join(openclawHome, 'openclaw.json'), {
@@ -162,7 +162,7 @@ test('SecurityScanner reports exposed configurations across the expanded scan se
 });
 
 test('SecurityScanner recognizes a hardened config and computes environment-driven verdicts correctly', async () => {
-  const homeDir = makeTempRoot('clawreins-scan-hardened-home-');
+  const homeDir = makeTempRoot('reins-scan-hardened-home-');
   const openclawHome = path.join(homeDir, '.openclaw');
   const openclawConfig = path.join(openclawHome, 'openclaw.json');
 
@@ -181,7 +181,7 @@ test('SecurityScanner recognizes a hardened config and computes environment-driv
     },
   });
   chmodSync(openclawConfig, 0o600);
-  writeJson(path.join(openclawHome, 'clawreins', 'policy.json'), {
+  writeJson(path.join(openclawHome, 'reins', 'policy.json'), {
     version: '1.0.0',
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
@@ -212,8 +212,8 @@ test('SecurityScanner recognizes a hardened config and computes environment-driv
   assert.equal(report.verdict, nodeStatus === 'FAIL' ? 'EXPOSED' : 'SECURE');
 });
 
-test('clawreins scan --json returns 13 checks and an EXPOSED exit code for unsafe configs', () => {
-  const homeDir = makeTempRoot('clawreins-scan-cli-home-');
+test('reins scan --json returns 13 checks and an EXPOSED exit code for unsafe configs', () => {
+  const homeDir = makeTempRoot('reins-scan-cli-home-');
   const openclawHome = path.join(homeDir, '.openclaw');
 
   writeJson(path.join(openclawHome, 'openclaw.json'), {
@@ -236,8 +236,8 @@ test('clawreins scan --json returns 13 checks and an EXPOSED exit code for unsaf
   assert.equal(getCheck(payload, 'DEFAULT_WEAK_CREDENTIALS').status, 'FAIL');
 });
 
-test('clawreins scan writes an HTML report and prints a file link by default', () => {
-  const homeDir = makeTempRoot('clawreins-scan-default-html-home-');
+test('reins scan writes an HTML report and prints a file link by default', () => {
+  const homeDir = makeTempRoot('reins-scan-default-html-home-');
   const openclawHome = path.join(homeDir, '.openclaw');
   const openclawConfig = path.join(openclawHome, 'openclaw.json');
 
@@ -268,8 +268,8 @@ test('clawreins scan writes an HTML report and prints a file link by default', (
   assert.ok(existsSync(reportPath));
 });
 
-test('clawreins scan --fix --yes creates a backup and applies supported remediations', () => {
-  const homeDir = makeTempRoot('clawreins-scan-fix-home-');
+test('reins scan --fix --yes creates a backup and applies supported remediations', () => {
+  const homeDir = makeTempRoot('reins-scan-fix-home-');
   const openclawHome = path.join(homeDir, '.openclaw');
   const openclawConfig = path.join(openclawHome, 'openclaw.json');
 
@@ -304,8 +304,8 @@ test('clawreins scan --fix --yes creates a backup and applies supported remediat
   assert.ok(existsSync(path.join(homeDir, 'Downloads', 'scan-report.html')));
 });
 
-test('clawreins scan --fix --yes binds gateway host when it is missing from config', () => {
-  const homeDir = makeTempRoot('clawreins-scan-fix-missing-host-home-');
+test('reins scan --fix --yes binds gateway host when it is missing from config', () => {
+  const homeDir = makeTempRoot('reins-scan-fix-missing-host-home-');
   const openclawHome = path.join(homeDir, '.openclaw');
   const openclawConfig = path.join(openclawHome, 'openclaw.json');
 
@@ -335,8 +335,8 @@ test('clawreins scan --fix --yes binds gateway host when it is missing from conf
   assert.equal(updatedConfig.gateway.host, '127.0.0.1');
 });
 
-test('clawreins scan --fix --yes does not inject gateway config into unrelated JSON files', () => {
-  const homeDir = makeTempRoot('clawreins-scan-fix-unrelated-json-home-');
+test('reins scan --fix --yes does not inject gateway config into unrelated JSON files', () => {
+  const homeDir = makeTempRoot('reins-scan-fix-unrelated-json-home-');
   const openclawHome = path.join(homeDir, '.openclaw');
   const openclawConfig = path.join(openclawHome, 'openclaw.json');
   const unrelatedConfig = path.join(openclawHome, 'config.json');
@@ -370,8 +370,8 @@ test('clawreins scan --fix --yes does not inject gateway config into unrelated J
   assert.deepEqual(updatedUnrelatedConfig, { theme: 'dark' });
 });
 
-test('clawreins scan --fix --yes does not overwrite non-object gateway values', () => {
-  const homeDir = makeTempRoot('clawreins-scan-fix-nonobject-gateway-home-');
+test('reins scan --fix --yes does not overwrite non-object gateway values', () => {
+  const homeDir = makeTempRoot('reins-scan-fix-nonobject-gateway-home-');
   const openclawHome = path.join(homeDir, '.openclaw');
   const openclawConfig = path.join(openclawHome, 'openclaw.json');
 
@@ -400,8 +400,8 @@ test('clawreins scan --fix --yes does not overwrite non-object gateway values', 
   assert.equal(readFileSync(openclawConfig, 'utf8'), before);
 });
 
-test('clawreins scan --fix --yes lists WARN findings when no auto-fixes are available', () => {
-  const homeDir = makeTempRoot('clawreins-scan-fix-warn-only-home-');
+test('reins scan --fix --yes lists WARN findings when no auto-fixes are available', () => {
+  const homeDir = makeTempRoot('reins-scan-fix-warn-only-home-');
   const openclawHome = path.join(homeDir, '.openclaw');
   const openclawConfig = path.join(openclawHome, 'openclaw.json');
 
@@ -428,8 +428,8 @@ test('clawreins scan --fix --yes lists WARN findings when no auto-fixes are avai
   assert.match(result.stdout, /HTTPS_TLS:/);
 });
 
-test('clawreins scan --monitor creates a baseline state file on first run', () => {
-  const homeDir = makeTempRoot('clawreins-scan-monitor-home-');
+test('reins scan --monitor creates a baseline state file on first run', () => {
+  const homeDir = makeTempRoot('reins-scan-monitor-home-');
   const openclawHome = path.join(homeDir, '.openclaw');
   const openclawConfig = path.join(openclawHome, 'openclaw.json');
 
@@ -452,8 +452,8 @@ test('clawreins scan --monitor creates a baseline state file on first run', () =
     OPENCLAW_HOME: openclawHome,
   });
 
-  const statePath = path.join(openclawHome, 'clawreins', 'scan-state.json');
-  const baselinePath = path.join(openclawHome, 'clawreins', 'config-base.json');
+  const statePath = path.join(openclawHome, 'reins', 'scan-state.json');
+  const baselinePath = path.join(openclawHome, 'reins', 'config-base.json');
   assert.notEqual(result.status, null);
   assert.match(result.stdout, /Drift Monitor:/);
   assert.match(result.stdout, /Baseline saved:/);
@@ -467,11 +467,11 @@ test('clawreins scan --monitor creates a baseline state file on first run', () =
   assert.equal(baseline.gateway.host, '127.0.0.1');
 });
 
-test('clawreins scan --monitor keeps comparing against the saved config baseline until reset', () => {
-  const homeDir = makeTempRoot('clawreins-scan-monitor-config-base-home-');
+test('reins scan --monitor keeps comparing against the saved config baseline until reset', () => {
+  const homeDir = makeTempRoot('reins-scan-monitor-config-base-home-');
   const openclawHome = path.join(homeDir, '.openclaw');
   const openclawConfig = path.join(openclawHome, 'openclaw.json');
-  const baselinePath = path.join(openclawHome, 'clawreins', 'config-base.json');
+  const baselinePath = path.join(openclawHome, 'reins', 'config-base.json');
 
   writeJson(openclawConfig, {
     gateway: { host: '127.0.0.1' },
@@ -520,11 +520,11 @@ test('clawreins scan --monitor keeps comparing against the saved config baseline
   assert.equal(readFileSync(baselinePath, 'utf8'), initialBaseline);
 });
 
-test('clawreins scan --monitor --reset-baseline replaces the saved config baseline', () => {
-  const homeDir = makeTempRoot('clawreins-scan-monitor-reset-base-home-');
+test('reins scan --monitor --reset-baseline replaces the saved config baseline', () => {
+  const homeDir = makeTempRoot('reins-scan-monitor-reset-base-home-');
   const openclawHome = path.join(homeDir, '.openclaw');
   const openclawConfig = path.join(openclawHome, 'openclaw.json');
-  const baselinePath = path.join(openclawHome, 'clawreins', 'config-base.json');
+  const baselinePath = path.join(openclawHome, 'reins', 'config-base.json');
 
   writeJson(openclawConfig, {
     gateway: { host: '127.0.0.1' },
@@ -580,8 +580,8 @@ test('clawreins scan --monitor --reset-baseline replaces the saved config baseli
   assert.doesNotMatch(followupResult.stdout, /CONFIG CHANGED: tools\.exec\.safeBins/);
 });
 
-test('clawreins scan --monitor alerts when a check worsens relative to the saved baseline', () => {
-  const homeDir = makeTempRoot('clawreins-scan-monitor-drift-home-');
+test('reins scan --monitor alerts when a check worsens relative to the saved baseline', () => {
+  const homeDir = makeTempRoot('reins-scan-monitor-drift-home-');
   const openclawHome = path.join(homeDir, '.openclaw');
   const openclawConfig = path.join(openclawHome, 'openclaw.json');
 
@@ -630,13 +630,13 @@ test('clawreins scan --monitor alerts when a check worsens relative to the saved
   assert.match(secondResult.stdout, /CONTROL_UI_AUTH: PASS -> FAIL/);
 });
 
-test('clawreins scan --monitor can invoke an alert command when drift is detected', () => {
-  const homeDir = makeTempRoot('clawreins-scan-monitor-alert-home-');
+test('reins scan --monitor can invoke an alert command when drift is detected', () => {
+  const homeDir = makeTempRoot('reins-scan-monitor-alert-home-');
   const openclawHome = path.join(homeDir, '.openclaw');
   const openclawConfig = path.join(openclawHome, 'openclaw.json');
   const alertOutput = path.join(homeDir, 'alert.txt');
   const alertCommand = `${JSON.stringify(process.execPath)} -e ${JSON.stringify(
-    "require('fs').writeFileSync(process.env.CLAWREINS_ALERT_OUT, process.env.CLAWREINS_SCAN_SUMMARY)"
+    "require('fs').writeFileSync(process.env.REINS_ALERT_OUT, process.env.REINS_SCAN_SUMMARY)"
   )}`;
 
   writeJson(openclawConfig, {
@@ -677,7 +677,7 @@ test('clawreins scan --monitor can invoke an alert command when drift is detecte
   const secondResult = runCli(['scan', '--monitor', '--alert-command', alertCommand], {
     HOME: homeDir,
     OPENCLAW_HOME: openclawHome,
-    CLAWREINS_ALERT_OUT: alertOutput,
+    REINS_ALERT_OUT: alertOutput,
   });
 
   assert.equal(secondResult.status, 2, `stderr: ${secondResult.stderr}`);
@@ -686,11 +686,11 @@ test('clawreins scan --monitor can invoke an alert command when drift is detecte
   assert.match(readFileSync(alertOutput, 'utf8'), /CONTROL_UI_AUTH: PASS -> FAIL/);
 });
 
-test('clawreins scan --monitor treats newly introduced unhealthy checks as drift', async () => {
-  const homeDir = makeTempRoot('clawreins-scan-monitor-new-check-home-');
+test('reins scan --monitor treats newly introduced unhealthy checks as drift', async () => {
+  const homeDir = makeTempRoot('reins-scan-monitor-new-check-home-');
   const openclawHome = path.join(homeDir, '.openclaw');
   const openclawConfig = path.join(openclawHome, 'openclaw.json');
-  const statePath = path.join(openclawHome, 'clawreins', 'scan-state.json');
+  const statePath = path.join(openclawHome, 'reins', 'scan-state.json');
 
   writeJson(openclawConfig, {
     gateway: { host: '0.0.0.0' },
@@ -726,8 +726,8 @@ test('clawreins scan --monitor treats newly introduced unhealthy checks as drift
   assert.match(result.stdout, /CONTROL_UI_AUTH: NEW -> FAIL/);
 });
 
-test('clawreins scan --monitor preserves the scan exit code when the alert command cannot start', () => {
-  const homeDir = makeTempRoot('clawreins-scan-monitor-alert-spawn-home-');
+test('reins scan --monitor preserves the scan exit code when the alert command cannot start', () => {
+  const homeDir = makeTempRoot('reins-scan-monitor-alert-spawn-home-');
   const openclawHome = path.join(homeDir, '.openclaw');
   const openclawConfig = path.join(openclawHome, 'openclaw.json');
 
@@ -776,8 +776,8 @@ test('clawreins scan --monitor preserves the scan exit code when the alert comma
   assert.match(result.stdout, /Notification command could not be started\./);
 });
 
-test('clawreins scan --monitor times out a hung alert command', () => {
-  const homeDir = makeTempRoot('clawreins-scan-monitor-alert-timeout-home-');
+test('reins scan --monitor times out a hung alert command', () => {
+  const homeDir = makeTempRoot('reins-scan-monitor-alert-timeout-home-');
   const openclawHome = path.join(homeDir, '.openclaw');
   const openclawConfig = path.join(openclawHome, 'openclaw.json');
   const alertCommand = `${JSON.stringify(process.execPath)} -e ${JSON.stringify('setTimeout(() => {}, 1000)')}`;
@@ -819,7 +819,7 @@ test('clawreins scan --monitor times out a hung alert command', () => {
   const result = runCli(['scan', '--monitor', '--alert-command', alertCommand], {
     HOME: homeDir,
     OPENCLAW_HOME: openclawHome,
-    CLAWREINS_ALERT_TIMEOUT_MS: '50',
+    REINS_ALERT_TIMEOUT_MS: '50',
   });
 
   assert.equal(result.status, 2, `stderr: ${result.stderr}`);
@@ -828,7 +828,7 @@ test('clawreins scan --monitor times out a hung alert command', () => {
 });
 
 test('enrollWatchtowerWithEmail provisions an API key and saves it to local config', async () => {
-  const homeDir = makeTempRoot('clawreins-watchtower-enroll-home-');
+  const homeDir = makeTempRoot('reins-watchtower-enroll-home-');
   const openclawHome = path.join(homeDir, '.openclaw');
   const openclawConfig = path.join(openclawHome, 'openclaw.json');
 
@@ -847,7 +847,7 @@ test('enrollWatchtowerWithEmail provisions an API key and saves it to local conf
   chmodSync(openclawConfig, 0o600);
 
   const report = await runScanner(openclawHome, homeDir);
-  const artifact = buildWatchtowerArtifact('clawreins scan', report, null);
+  const artifact = buildWatchtowerArtifact('reins scan', report, null);
   const fetchCalls = [];
 
   const previousOpenclawHome = process.env.OPENCLAW_HOME;
@@ -871,7 +871,7 @@ test('enrollWatchtowerWithEmail provisions an API key and saves it to local conf
     }, async () => enrollWatchtowerWithEmail('calin@example.com', artifact, 'https://app.pegasi.ai'));
 
     assert.equal(result.dashboardUrl, 'https://app.pegasi.ai/dashboard/abc123');
-    assert.equal(result.configPath, path.join(openclawHome, 'clawreins', 'config.json'));
+    assert.equal(result.configPath, path.join(openclawHome, 'reins', 'config.json'));
     assert.equal(result.status, 'created');
     assert.equal(fetchCalls.length, 1);
     assert.equal(fetchCalls[0].url, 'https://app.pegasi.ai/api/auth/signup-cli');
@@ -902,7 +902,7 @@ test('enrollWatchtowerWithEmail provisions an API key and saves it to local conf
 });
 
 test('enrollWatchtowerWithEmail handles existing accounts without issuing a new API key', async () => {
-  const homeDir = makeTempRoot('clawreins-watchtower-existing-home-');
+  const homeDir = makeTempRoot('reins-watchtower-existing-home-');
   const openclawHome = path.join(homeDir, '.openclaw');
   const openclawConfig = path.join(openclawHome, 'openclaw.json');
 
@@ -921,7 +921,7 @@ test('enrollWatchtowerWithEmail handles existing accounts without issuing a new 
   chmodSync(openclawConfig, 0o600);
 
   const report = await runScanner(openclawHome, homeDir);
-  const artifact = buildWatchtowerArtifact('clawreins scan', report, null);
+  const artifact = buildWatchtowerArtifact('reins scan', report, null);
   const previousOpenclawHome = process.env.OPENCLAW_HOME;
   const previousHome = process.env.HOME;
 
@@ -934,7 +934,7 @@ test('enrollWatchtowerWithEmail handles existing accounts without issuing a new 
       json: async () => ({
         api_key: null,
         dashboard_url: 'https://app.pegasi.ai/dashboard/usr_existing',
-        message: 'Account exists. Check your email for dashboard access. Your original API key is in ~/.openclaw/clawreins/config.json',
+        message: 'Account exists. Check your email for dashboard access. Your original API key is in ~/.openclaw/reins/config.json',
       }),
       status: 200,
       statusText: 'OK',
@@ -959,11 +959,11 @@ test('enrollWatchtowerWithEmail handles existing accounts without issuing a new 
   }
 });
 
-test('clawreins scan uploads to Watchtower using saved local config without env vars', async () => {
-  const homeDir = makeTempRoot('clawreins-watchtower-upload-home-');
+test('reins scan uploads to Watchtower using saved local config without env vars', async () => {
+  const homeDir = makeTempRoot('reins-watchtower-upload-home-');
   const openclawHome = path.join(homeDir, '.openclaw');
   const openclawConfig = path.join(openclawHome, 'openclaw.json');
-  const clawreinsConfig = path.join(openclawHome, 'clawreins', 'config.json');
+  const reinsConfig = path.join(openclawHome, 'reins', 'config.json');
 
   writeJson(openclawConfig, {
     gateway: { host: '127.0.0.1' },
@@ -979,7 +979,7 @@ test('clawreins scan uploads to Watchtower using saved local config without env 
   });
   chmodSync(openclawConfig, 0o600);
 
-  writeJson(clawreinsConfig, {
+  writeJson(reinsConfig, {
     watchtower: {
       apiKey: 'wt-saved-key-1234567890',
       baseUrl: 'https://app.pegasi.ai',
@@ -987,19 +987,19 @@ test('clawreins scan uploads to Watchtower using saved local config without env 
       email: 'calin@example.com',
     },
   });
-  chmodSync(clawreinsConfig, 0o600);
+  chmodSync(reinsConfig, 0o600);
 
   const previousOpenclawHome = process.env.OPENCLAW_HOME;
   const previousHome = process.env.HOME;
   const previousExitCode = process.exitCode;
-  const previousWatchtowerBaseUrl = process.env.CLAWREINS_WATCHTOWER_BASE_URL;
-  const previousWatchtowerApiKey = process.env.CLAWREINS_WATCHTOWER_API_KEY;
+  const previousWatchtowerBaseUrl = process.env.REINS_WATCHTOWER_BASE_URL;
+  const previousWatchtowerApiKey = process.env.REINS_WATCHTOWER_API_KEY;
   const fetchCalls = [];
 
   process.env.OPENCLAW_HOME = openclawHome;
   process.env.HOME = homeDir;
-  delete process.env.CLAWREINS_WATCHTOWER_BASE_URL;
-  delete process.env.CLAWREINS_WATCHTOWER_API_KEY;
+  delete process.env.REINS_WATCHTOWER_BASE_URL;
+  delete process.env.REINS_WATCHTOWER_API_KEY;
 
   try {
     const consoleEntries = await withMockedFetch(async (url, options) => {
@@ -1019,7 +1019,7 @@ test('clawreins scan uploads to Watchtower using saved local config without env 
     assert.equal(fetchCalls[0].options.headers['x-api-key'], 'wt-saved-key-1234567890');
 
     const payload = JSON.parse(fetchCalls[0].options.body);
-    assert.equal(payload.source.producer, 'clawreins');
+    assert.equal(payload.source.producer, 'reins');
     assert.equal(payload.target.kind, 'repository');
 
     assert.match(consoleEntries.log.join('\n'), /Watchtower Upload:/);
@@ -1040,21 +1040,21 @@ test('clawreins scan uploads to Watchtower using saved local config without env 
     }
 
     if (typeof previousWatchtowerBaseUrl === 'string') {
-      process.env.CLAWREINS_WATCHTOWER_BASE_URL = previousWatchtowerBaseUrl;
+      process.env.REINS_WATCHTOWER_BASE_URL = previousWatchtowerBaseUrl;
     } else {
-      delete process.env.CLAWREINS_WATCHTOWER_BASE_URL;
+      delete process.env.REINS_WATCHTOWER_BASE_URL;
     }
 
     if (typeof previousWatchtowerApiKey === 'string') {
-      process.env.CLAWREINS_WATCHTOWER_API_KEY = previousWatchtowerApiKey;
+      process.env.REINS_WATCHTOWER_API_KEY = previousWatchtowerApiKey;
     } else {
-      delete process.env.CLAWREINS_WATCHTOWER_API_KEY;
+      delete process.env.REINS_WATCHTOWER_API_KEY;
     }
   }
 });
 
-test('clawreins scan --html does not crash when the system opener is unavailable', () => {
-  const homeDir = makeTempRoot('clawreins-scan-html-home-');
+test('reins scan --html does not crash when the system opener is unavailable', () => {
+  const homeDir = makeTempRoot('reins-scan-html-home-');
   const openclawHome = path.join(homeDir, '.openclaw');
   const openclawConfig = path.join(openclawHome, 'openclaw.json');
 

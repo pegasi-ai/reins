@@ -1,16 +1,14 @@
 /**
- * ClawReins PolicyStore
- * Manages persistence of security policies in ~/.openclaw/clawreins/policy.json
+ * Reins PolicyStore
+ * Manages persistence of security policies in ~/.openclaw/reins/policy.json
  */
 
 import fs from 'fs-extra';
 import { readFileSync, existsSync, mkdirSync, writeFileSync } from 'fs';
-import path from 'path';
 import { SecurityPolicy } from '../types';
 import { DEFAULT_POLICY } from '../config';
-import { CLAWREINS_DATA_DIR, logger } from '../core/Logger';
-
-const POLICY_FILE = path.join(CLAWREINS_DATA_DIR, 'policy.json');
+import { logger } from '../core/Logger';
+import { getDataPath, getPreferredDataPath, getReinsDataDir } from '../core/data-dir';
 
 export interface PersistedPolicy extends SecurityPolicy {
   version: string;
@@ -24,12 +22,12 @@ export class PolicyStore {
    */
   static async load(): Promise<PersistedPolicy> {
     try {
-      // Ensure directory exists
-      await fs.ensureDir(CLAWREINS_DATA_DIR);
+      const policyFile = getDataPath('policy.json');
+      await fs.ensureDir(getReinsDataDir());
 
-      if (await fs.pathExists(POLICY_FILE)) {
-        const data = await fs.readJson(POLICY_FILE);
-        logger.info('Policy loaded from disk', { path: POLICY_FILE });
+      if (await fs.pathExists(policyFile)) {
+        const data = await fs.readJson(policyFile);
+        logger.info('Policy loaded from disk', { path: policyFile });
         return data;
       } else {
         // Create default policy
@@ -54,10 +52,11 @@ export class PolicyStore {
    */
   static async save(policy: PersistedPolicy): Promise<void> {
     try {
-      await fs.ensureDir(CLAWREINS_DATA_DIR);
+      const policyFile = getPreferredDataPath('policy.json');
+      await fs.ensureDir(getReinsDataDir());
       policy.updatedAt = new Date().toISOString();
-      await fs.writeJson(POLICY_FILE, policy, { spaces: 2 });
-      logger.info('Policy saved to disk', { path: POLICY_FILE });
+      await fs.writeJson(policyFile, policy, { spaces: 2 });
+      logger.info('Policy saved to disk', { path: policyFile });
     } catch (error) {
       logger.error('Failed to save policy', { error });
       throw new Error(`Failed to save policy: ${error}`);
@@ -83,13 +82,17 @@ export class PolicyStore {
    */
   static loadSync(): PersistedPolicy {
     try {
-      if (!existsSync(CLAWREINS_DATA_DIR)) {
-        mkdirSync(CLAWREINS_DATA_DIR, { recursive: true });
+      const policyFile = getDataPath('policy.json');
+      const preferredPolicyFile = getPreferredDataPath('policy.json');
+
+      const reinsDataDir = getReinsDataDir();
+      if (!existsSync(reinsDataDir)) {
+        mkdirSync(reinsDataDir, { recursive: true });
       }
 
-      if (existsSync(POLICY_FILE)) {
-        const data = JSON.parse(readFileSync(POLICY_FILE, 'utf-8'));
-        logger.info('Policy loaded from disk (sync)', { path: POLICY_FILE });
+      if (existsSync(policyFile)) {
+        const data = JSON.parse(readFileSync(policyFile, 'utf-8'));
+        logger.info('Policy loaded from disk (sync)', { path: policyFile });
         return data;
       } else {
         const defaultPolicy: PersistedPolicy = {
@@ -98,8 +101,8 @@ export class PolicyStore {
           createdAt: new Date().toISOString(),
           updatedAt: new Date().toISOString(),
         };
-        writeFileSync(POLICY_FILE, JSON.stringify(defaultPolicy, null, 2), 'utf-8');
-        logger.info('Created default policy (sync)', { path: POLICY_FILE });
+        writeFileSync(preferredPolicyFile, JSON.stringify(defaultPolicy, null, 2), 'utf-8');
+        logger.info('Created default policy (sync)', { path: preferredPolicyFile });
         return defaultPolicy;
       }
     } catch (error) {
@@ -112,6 +115,6 @@ export class PolicyStore {
    * Get the policy file path
    */
   static getPath(): string {
-    return POLICY_FILE;
+    return getPreferredDataPath('policy.json');
   }
 }

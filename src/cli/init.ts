@@ -14,7 +14,7 @@ import {
   getOpenClawPaths,
 } from '../plugin/config-manager';
 import { PolicyStore, PersistedPolicy } from '../storage/PolicyStore';
-import { logger, CLAWREINS_DATA_DIR } from '../core/Logger';
+import { logger, REINS_DATA_DIR } from '../core/Logger';
 import { DEFAULT_POLICY } from '../config';
 import { SecurityRule } from '../types';
 import { getProtectedModules } from '../plugin/tool-interceptor';
@@ -211,12 +211,12 @@ function findPluginManifestPath(pluginDir: string): string | null {
 function getNextSteps(toolShieldSkipped: boolean): string[] {
   const nextSteps = [
     'Restart OpenClaw gateway: openclaw gateway restart',
-    'Edit security policy: clawreins policy',
-    'View audit trail: clawreins audit',
+    'Edit security policy: reins policy',
+    'View audit trail: reins audit',
   ];
 
   if (toolShieldSkipped) {
-    nextSteps.splice(2, 0, 'Sync ToolShield guardrails: clawreins toolshield-sync');
+    nextSteps.splice(2, 0, 'Sync ToolShield guardrails: reins toolshield-sync');
   }
 
   return nextSteps;
@@ -325,7 +325,7 @@ export async function initWizard(options: InitWizardOptions = {}): Promise<InitS
   // Step 2: Choose security level
   let securityLevel: SecurityLevel;
   if (nonInteractive) {
-    const fromEnv = process.env.CLAWREINS_SECURITY_LEVEL;
+    const fromEnv = process.env.REINS_SECURITY_LEVEL || process.env.CLAWREINS_SECURITY_LEVEL;
     securityLevel = parseSecurityLevel(options.securityLevel || fromEnv || 'balanced');
   } else {
     if (!jsonMode) {
@@ -372,14 +372,14 @@ export async function initWizard(options: InitWizardOptions = {}): Promise<InitS
   let selectedModules: string[] = [];
 
   if (nonInteractive) {
-    const explicitModules = parseModules(options.modules || process.env.CLAWREINS_MODULES);
+    const explicitModules = parseModules(options.modules || process.env.REINS_MODULES || process.env.CLAWREINS_MODULES);
 
     if (securityLevel === 'custom' && explicitModules.length === 0) {
       throw new InitWizardError(
         'Custom security level requires explicit modules in non-interactive mode.',
         'E_MISSING_REQUIRED',
         {
-          required: ['--modules <comma-separated>', 'or CLAWREINS_MODULES'],
+          required: ['--modules <comma-separated>', 'or REINS_MODULES'],
           securityLevel,
         }
       );
@@ -474,7 +474,7 @@ export async function initWizard(options: InitWizardOptions = {}): Promise<InitS
       warnings.push(toolShieldResult.message);
       if (!jsonMode) {
         console.log(chalk.yellow(`⚠️  ${toolShieldResult.message}`));
-        console.log(chalk.dim('  You can retry manually with: clawreins toolshield-sync'));
+        console.log(chalk.dim('  You can retry manually with: reins toolshield-sync'));
       }
     }
   } else {
@@ -482,7 +482,7 @@ export async function initWizard(options: InitWizardOptions = {}): Promise<InitS
     warnings.push('ToolShield sync skipped in non-interactive mode.');
     if (!jsonMode) {
       console.log(chalk.yellow('⚠️  ToolShield sync skipped in non-interactive mode.'));
-      console.log(chalk.dim('  You can run: clawreins toolshield-sync'));
+      console.log(chalk.dim('  You can run: reins toolshield-sync'));
     }
   }
 
@@ -524,7 +524,7 @@ export async function initWizard(options: InitWizardOptions = {}): Promise<InitS
 
         // Pull initial policies
         const bundle = await fetchPolicies(apiKey as string, baseUrl as string);
-        const policiesPath = path.join(CLAWREINS_DATA_DIR, 'policies.json');
+        const policiesPath = path.join(REINS_DATA_DIR, 'policies.json');
         await fs.writeJson(policiesPath, bundle, { spaces: 2 });
 
         // Merge shell policies
@@ -583,7 +583,7 @@ export async function initWizard(options: InitWizardOptions = {}): Promise<InitS
       const message = error instanceof Error ? error.message : String(error);
       warnings.push(`Initial security scan failed: ${message}`);
       console.log(chalk.yellow(`⚠️  Initial security scan failed: ${message}`));
-      console.log(chalk.dim('  You can retry manually with: clawreins scan'));
+      console.log(chalk.dim('  You can retry manually with: reins scan'));
     }
   }
 
@@ -599,14 +599,14 @@ export async function initWizard(options: InitWizardOptions = {}): Promise<InitS
     console.log(chalk.dim(`  OpenClaw config: ${paths.openclawConfig}`));
     console.log(chalk.dim(`  Plugin dir:      ${paths.pluginDir}`));
     console.log(chalk.dim(`  Policy:          ${PolicyStore.getPath()}`));
-    console.log(chalk.dim(`  Audit log:       ${CLAWREINS_DATA_DIR}/decisions.jsonl`));
-    console.log(chalk.dim(`  Stats:           ${CLAWREINS_DATA_DIR}/stats.json`));
+    console.log(chalk.dim(`  Audit log:       ${REINS_DATA_DIR}/decisions.jsonl`));
+    console.log(chalk.dim(`  Stats:           ${REINS_DATA_DIR}/stats.json`));
     console.log('');
 
     console.log(chalk.bold('Next steps:'));
     console.log(chalk.cyan('  1. Restart gateway:') + chalk.dim('  openclaw gateway restart'));
-    console.log(chalk.cyan('  2. Edit policy:') + chalk.dim('      clawreins policy'));
-    console.log(chalk.cyan('  3. View audit trail:') + chalk.dim('  clawreins audit'));
+    console.log(chalk.cyan('  2. Edit policy:') + chalk.dim('      reins policy'));
+    console.log(chalk.cyan('  3. View audit trail:') + chalk.dim('  reins audit'));
     console.log('');
   }
 
