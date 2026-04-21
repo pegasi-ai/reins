@@ -141,7 +141,7 @@ export async function uploadWatchtowerArtifact(
     method: 'POST',
     headers: {
       'content-type': 'application/json',
-      Authorization: `Bearer ${accessToken}`,
+      'x-api-key': accessToken,
     },
     body: JSON.stringify(artifact),
   });

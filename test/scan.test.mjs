@@ -1131,7 +1131,7 @@ test('reins scan uploads to Watchtower using saved local config without env vars
 
     assert.equal(fetchCalls.length, 1);
     assert.equal(fetchCalls[0].url, 'https://app.pegasi.ai/api/scan-artifacts/ingest');
-    assert.equal(fetchCalls[0].options.headers.Authorization, 'Bearer wt-saved-key-1234567890');
+    assert.equal(fetchCalls[0].options.headers['x-api-key'], 'wt-saved-key-1234567890');
 
     const payload = JSON.parse(fetchCalls[0].options.body);
     assert.equal(payload.source.producer, 'reins');

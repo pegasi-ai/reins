@@ -263,6 +263,10 @@ function bearerHeaders(apiKey: string): Record<string, string> {
   return { Authorization: `Bearer ${apiKey}` };
 }
 
+function apiKeyHeaders(apiKey: string): Record<string, string> {
+  return { 'x-api-key': apiKey };
+}
+
 function parseJsonObject(body: string): Record<string, unknown> {
   const raw = JSON.parse(body) as unknown;
   if (!raw || typeof raw !== 'object') {
@@ -656,7 +660,7 @@ export async function ingestDecisions(
     decisionTime: d.decisionTime,
     run_id: d.run_id ?? null,
   }));
-  const { status } = await nodeRequest('POST', url, bearerHeaders(apiKey), JSON.stringify(payload), timeoutMs);
+  const { status } = await nodeRequest('POST', url, apiKeyHeaders(apiKey), JSON.stringify(payload), timeoutMs);
   return { status };
 }
 
