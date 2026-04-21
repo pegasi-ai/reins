@@ -29,16 +29,6 @@ function getCliVersion(): string {
   }
 }
 
-function getCliVersion(): string {
-  try {
-    const packageJsonPath = path.resolve(__dirname, '..', '..', 'package.json');
-    const packageJson = JSON.parse(fs.readFileSync(packageJsonPath, 'utf8')) as { version?: unknown };
-    return typeof packageJson.version === 'string' ? packageJson.version : '1.0.0';
-  } catch {
-    return '1.0.0';
-  }
-}
-
 const program = new Command();
 
 program.name('reins').description('Reins — runtime security and policy enforcement for Claude Code.').version(getCliVersion());
