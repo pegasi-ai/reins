@@ -21,9 +21,14 @@ import { getProtectedModules } from '../plugin/tool-interceptor';
 import { syncToolShieldDefaults } from '../toolshield/sync';
 import { runSetupScan } from './scan';
 import { installWatchtowerSchedule, supportsScheduledScans } from './scheduler';
-import { resolveWatchtowerCredentials, saveWatchtowerSettings, DEFAULT_WATCHTOWER_BASE_URL } from '../storage/WatchtowerConfig';
-import { signupCli, validateApiKey, fetchPolicies, fetchShellPolicies } from '../lib/watchtower-client';
+import {
+  resolveWatchtowerCredentials,
+  loadWatchtowerSettings,
+  DEFAULT_WATCHTOWER_BASE_URL,
+} from '../storage/WatchtowerConfig';
+import { fetchPolicies, fetchShellPolicies } from '../lib/watchtower-client';
 import { installClaudeCodeHooks } from '../lib/hook-installer';
+import { runCliLoginFlow } from './auth';
 
 type SecurityLevel = 'permissive' | 'balanced' | 'strict' | 'custom';
 
@@ -277,212 +282,220 @@ export async function initWizard(options: InitWizardOptions = {}): Promise<InitS
     console.log('');
   }
 
-  // Step 1: Detect OpenClaw
+  // Step 1: Detect OpenClaw (optional — Reins works standalone with Claude Code)
   if (!jsonMode) {
     console.log(chalk.bold('Step 1: Detecting OpenClaw...'));
   }
 
   const isInstalled = await isOpenClawInstalled();
-  if (!isInstalled) {
-    throw new InitWizardError('OpenClaw is not installed or not found.', 'E_OPENCLAW_NOT_FOUND', {
-      openclawHome: paths.openclawHome,
-    });
-  }
+  const openclawMode = isInstalled;
 
   if (!jsonMode) {
-    console.log(chalk.green('✅ OpenClaw detected'));
+    if (isInstalled) {
+      console.log(chalk.green('✅ OpenClaw detected'));
+    } else {
+      console.log(chalk.dim('ℹ  OpenClaw not found — continuing with Claude Code-only setup.'));
+    }
     console.log('');
   }
 
-  // Check if already registered
-  const alreadyRegistered = await isPluginRegistered();
-  if (alreadyRegistered && !nonInteractive) {
-    const { shouldReconfigure } = await inquirer.prompt([
-      {
-        type: 'confirm',
-        name: 'shouldReconfigure',
-        message: 'Reins is already configured. Reconfigure?',
-        default: false,
-      },
-    ]);
+  // toolShieldSkipped tracks whether the ToolShield sync step was skipped;
+  // starts true for Claude Code-only installs (no OpenClaw = no ToolShield).
+  let toolShieldSkipped = !openclawMode;
 
-    if (!shouldReconfigure) {
-      if (!jsonMode) {
-        console.log(chalk.yellow('Setup cancelled.'));
-      }
-      return {
-        ok: true,
-        configPath: paths.openclawConfig,
-        policyPath: PolicyStore.getPath(),
-        openclawHome: paths.openclawHome,
-        restartRecommended: false,
-        warnings,
-        nextSteps: ['Run again when you want to update the configuration.'],
-      };
-    }
-  }
-
-  // Step 2: Choose security level
-  let securityLevel: SecurityLevel;
-  if (nonInteractive) {
-    const fromEnv = process.env.REINS_SECURITY_LEVEL || process.env.CLAWREINS_SECURITY_LEVEL;
-    securityLevel = parseSecurityLevel(options.securityLevel || fromEnv || 'balanced');
+  if (!openclawMode) {
+    // Claude Code-only path: skip OpenClaw-specific steps 2–6
+    // Jump straight to Reins Cloud + hooks + scan (steps 7–8)
   } else {
-    if (!jsonMode) {
-      console.log(chalk.bold('Step 2: Choose your security level'));
-      console.log('');
-    }
-
-    const answer = await inquirer.prompt([
-      {
-        type: 'list',
-        name: 'securityLevel',
-        message: 'Which security policy would you like to use?',
-        choices: [
-          {
-            name: `${SECURITY_PRESETS.permissive.name} - ${SECURITY_PRESETS.permissive.description}`,
-            value: 'permissive',
-          },
-          {
-            name: `${SECURITY_PRESETS.balanced.name} - ${SECURITY_PRESETS.balanced.description}`,
-            value: 'balanced',
-          },
-          {
-            name: `${SECURITY_PRESETS.strict.name} - ${SECURITY_PRESETS.strict.description}`,
-            value: 'strict',
-          },
-          {
-            name: '⚙️  Custom (configure manually after setup)',
-            value: 'custom',
-          },
-        ],
-        default: 'balanced',
-      },
-    ]);
-
-    securityLevel = parseSecurityLevel(answer.securityLevel);
-
-    if (!jsonMode) {
-      console.log('');
-    }
-  }
-
-  // Step 3: Select modules to protect
-  const availableModules = getProtectedModules();
-  let selectedModules: string[] = [];
-
-  if (nonInteractive) {
-    const explicitModules = parseModules(options.modules || process.env.REINS_MODULES || process.env.CLAWREINS_MODULES);
-
-    if (securityLevel === 'custom' && explicitModules.length === 0) {
-      throw new InitWizardError(
-        'Custom security level requires explicit modules in non-interactive mode.',
-        'E_MISSING_REQUIRED',
+    // Check if already registered
+    const alreadyRegistered = await isPluginRegistered();
+    if (alreadyRegistered && !nonInteractive) {
+      const { shouldReconfigure } = await inquirer.prompt([
         {
-          required: ['--modules <comma-separated>', 'or REINS_MODULES'],
-          securityLevel,
+          type: 'confirm',
+          name: 'shouldReconfigure',
+          message: 'Reins is already configured. Reconfigure?',
+          default: false,
+        },
+      ]);
+
+      if (!shouldReconfigure) {
+        if (!jsonMode) {
+          console.log(chalk.yellow('Setup cancelled.'));
         }
-      );
+        return {
+          ok: true,
+          configPath: paths.openclawConfig,
+          policyPath: PolicyStore.getPath(),
+          openclawHome: paths.openclawHome,
+          restartRecommended: false,
+          warnings,
+          nextSteps: ['Run again when you want to update the configuration.'],
+        };
+      }
     }
 
-    selectedModules = explicitModules.length > 0 ? explicitModules : DEFAULT_MODULES;
-
-    const unknownModules = selectedModules.filter((moduleName) => !availableModules.includes(moduleName));
-    if (unknownModules.length > 0) {
-      throw new InitWizardError('One or more modules are invalid.', 'E_INVALID_MODULES', {
-        invalidModules: unknownModules,
-        allowedModules: availableModules,
-      });
-    }
-  } else {
-    if (!jsonMode) {
-      console.log(chalk.bold('Step 3: Select which OpenClaw tools to protect'));
-      console.log('');
-    }
-
-    const answer = await inquirer.prompt([
-      {
-        type: 'checkbox',
-        name: 'selectedModules',
-        message: 'Which tool modules should Reins intercept?',
-        choices: availableModules.map((mod) => ({
-          name: mod,
-          value: mod,
-          checked: DEFAULT_MODULES.includes(mod),
-        })),
-      },
-    ]);
-
-    selectedModules = answer.selectedModules;
-
-    if (!jsonMode) {
-      console.log('');
-    }
-  }
-
-  // Step 4: Create policy
-  if (!jsonMode) {
-    console.log(chalk.bold('Step 4: Creating security policy...'));
-  }
-
-  const policy = buildPolicy(securityLevel, selectedModules);
-  await PolicyStore.save(policy);
-
-  if (!jsonMode) {
-    console.log(chalk.green(`✅ Policy saved to ${PolicyStore.getPath()}`));
-    console.log('');
-  }
-
-  // Step 5: Register plugin in OpenClaw config
-  if (!jsonMode) {
-    console.log(chalk.bold('Step 5: Registering with OpenClaw...'));
-
-    const manifestPath = findPluginManifestPath(paths.pluginDir);
-    if (manifestPath) {
-      const pluginRoot = path.dirname(manifestPath);
-      console.log(chalk.dim(`  Plugin manifest found: ${manifestPath}`));
-      console.log(chalk.dim(`  Install with: openclaw plugins install --link ${pluginRoot}`));
-    }
-  }
-
-  await registerPlugin(policy.defaultAction);
-
-  if (!jsonMode) {
-    console.log(chalk.green('✅ Reins registered in OpenClaw config'));
-    console.log('');
-  }
-
-  // Step 6: ToolShield defaults
-  const shouldSyncToolshield =
-    nonInteractive ? options.syncToolshield === true : true;
-
-  if (!jsonMode) {
-    console.log(chalk.bold('Step 6: Enabling ToolShield defaults...'));
-  }
-
-  let toolShieldSkipped = false;
-  if (shouldSyncToolshield) {
-    const toolShieldResult = await syncToolShieldDefaults();
-    if (toolShieldResult.synced) {
+    // Step 2: Choose security level
+    let securityLevel: SecurityLevel;
+    if (nonInteractive) {
+      const fromEnv = process.env.REINS_SECURITY_LEVEL || process.env.CLAWREINS_SECURITY_LEVEL;
+      securityLevel = parseSecurityLevel(options.securityLevel || fromEnv || 'balanced');
+    } else {
       if (!jsonMode) {
-        console.log(chalk.green(`✅ ${toolShieldResult.message}`));
-        if (toolShieldResult.installedNow) {
-          console.log(chalk.dim('  ToolShield was installed automatically via pip.'));
+        console.log(chalk.bold('Step 2: Choose your security level'));
+        console.log('');
+      }
+
+      const answer = await inquirer.prompt([
+        {
+          type: 'list',
+          name: 'securityLevel',
+          message: 'Which security policy would you like to use?',
+          choices: [
+            {
+              name: `${SECURITY_PRESETS.permissive.name} - ${SECURITY_PRESETS.permissive.description}`,
+              value: 'permissive',
+            },
+            {
+              name: `${SECURITY_PRESETS.balanced.name} - ${SECURITY_PRESETS.balanced.description}`,
+              value: 'balanced',
+            },
+            {
+              name: `${SECURITY_PRESETS.strict.name} - ${SECURITY_PRESETS.strict.description}`,
+              value: 'strict',
+            },
+            {
+              name: '⚙️  Custom (configure manually after setup)',
+              value: 'custom',
+            },
+          ],
+          default: 'balanced',
+        },
+      ]);
+
+      securityLevel = parseSecurityLevel(answer.securityLevel);
+
+      if (!jsonMode) {
+        console.log('');
+      }
+    }
+
+    // Step 3: Select modules to protect
+    const availableModules = getProtectedModules();
+    let selectedModules: string[] = [];
+
+    if (nonInteractive) {
+      const explicitModules = parseModules(options.modules || process.env.REINS_MODULES || process.env.CLAWREINS_MODULES);
+
+      if (securityLevel === 'custom' && explicitModules.length === 0) {
+        throw new InitWizardError(
+          'Custom security level requires explicit modules in non-interactive mode.',
+          'E_MISSING_REQUIRED',
+          {
+            required: ['--modules <comma-separated>', 'or REINS_MODULES'],
+            securityLevel,
+          }
+        );
+      }
+
+      selectedModules = explicitModules.length > 0 ? explicitModules : DEFAULT_MODULES;
+
+      const unknownModules = selectedModules.filter((moduleName) => !availableModules.includes(moduleName));
+      if (unknownModules.length > 0) {
+        throw new InitWizardError('One or more modules are invalid.', 'E_INVALID_MODULES', {
+          invalidModules: unknownModules,
+          allowedModules: availableModules,
+        });
+      }
+    } else {
+      if (!jsonMode) {
+        console.log(chalk.bold('Step 3: Select which OpenClaw tools to protect'));
+        console.log('');
+      }
+
+      const answer = await inquirer.prompt([
+        {
+          type: 'checkbox',
+          name: 'selectedModules',
+          message: 'Which tool modules should Reins intercept?',
+          choices: availableModules.map((mod) => ({
+            name: mod,
+            value: mod,
+            checked: DEFAULT_MODULES.includes(mod),
+          })),
+        },
+      ]);
+
+      selectedModules = answer.selectedModules;
+
+      if (!jsonMode) {
+        console.log('');
+      }
+    }
+
+    // Step 4: Create policy
+    if (!jsonMode) {
+      console.log(chalk.bold('Step 4: Creating security policy...'));
+    }
+
+    const policy = buildPolicy(securityLevel, selectedModules);
+    await PolicyStore.save(policy);
+
+    if (!jsonMode) {
+      console.log(chalk.green(`✅ Policy saved to ${PolicyStore.getPath()}`));
+      console.log('');
+    }
+
+    // Step 5: Register plugin in OpenClaw config
+    if (!jsonMode) {
+      console.log(chalk.bold('Step 5: Registering with OpenClaw...'));
+
+      const manifestPath = findPluginManifestPath(paths.pluginDir);
+      if (manifestPath) {
+        const pluginRoot = path.dirname(manifestPath);
+        console.log(chalk.dim(`  Plugin manifest found: ${manifestPath}`));
+        console.log(chalk.dim(`  Install with: openclaw plugins install --link ${pluginRoot}`));
+      }
+    }
+
+    await registerPlugin(policy.defaultAction);
+
+    if (!jsonMode) {
+      console.log(chalk.green('✅ Reins registered in OpenClaw config'));
+      console.log('');
+    }
+
+    // Step 6: ToolShield defaults
+    const shouldSyncToolshield =
+      nonInteractive ? options.syncToolshield === true : true;
+
+    if (!jsonMode) {
+      console.log(chalk.bold('Step 6: Enabling ToolShield defaults...'));
+    }
+
+    if (shouldSyncToolshield) {
+      const toolShieldResult = await syncToolShieldDefaults();
+      if (toolShieldResult.synced) {
+        if (!jsonMode) {
+          console.log(chalk.green(`✅ ${toolShieldResult.message}`));
+          if (toolShieldResult.installedNow) {
+            console.log(chalk.dim('  ToolShield was installed automatically via pip.'));
+          }
+        }
+      } else {
+        warnings.push(toolShieldResult.message);
+        if (!jsonMode) {
+          console.log(chalk.yellow(`⚠️  ${toolShieldResult.message}`));
+          console.log(chalk.dim('  You can retry manually with: reins toolshield-sync'));
         }
       }
     } else {
-      warnings.push(toolShieldResult.message);
+      toolShieldSkipped = true;
+      warnings.push('ToolShield sync skipped in non-interactive mode.');
       if (!jsonMode) {
-        console.log(chalk.yellow(`⚠️  ${toolShieldResult.message}`));
-        console.log(chalk.dim('  You can retry manually with: reins toolshield-sync'));
+        console.log(chalk.yellow('⚠️  ToolShield sync skipped in non-interactive mode.'));
+        console.log(chalk.dim('  You can run: reins toolshield-sync'));
       }
-    }
-  } else {
-    toolShieldSkipped = true;
-    warnings.push('ToolShield sync skipped in non-interactive mode.');
-    if (!jsonMode) {
-      console.log(chalk.yellow('⚠️  ToolShield sync skipped in non-interactive mode.'));
-      console.log(chalk.dim('  You can run: reins toolshield-sync'));
     }
   }
 
@@ -496,48 +509,32 @@ export async function initWizard(options: InitWizardOptions = {}): Promise<InitS
     }]);
 
     if (connectWatchtower) {
-      const { email } = await inquirer.prompt([{
-        type: 'input',
-        name: 'email',
-        message: 'Your email address:',
-        validate: (v: string) => v.trim().length > 0 || 'Email is required',
-      }]);
-
-      const baseUrl = DEFAULT_WATCHTOWER_BASE_URL;
+      const watchtowerSettings = await loadWatchtowerSettings();
+      const baseUrl =
+        watchtowerSettings?.baseUrl?.trim()
+        || watchtowerSettings?.baseUrl
+        || process.env.REINS_WATCHTOWER_BASE_URL?.trim()
+        || process.env.CLAWREINS_WATCHTOWER_BASE_URL?.trim()
+        || DEFAULT_WATCHTOWER_BASE_URL;
 
       try {
-        console.log(chalk.dim('  Connecting to Reins Cloud...'));
-        const signup = await signupCli(email as string, baseUrl);
-
-        const validation = await validateApiKey(signup.api_key, baseUrl);
-        await saveWatchtowerSettings({
-          apiKey: signup.api_key,
-          baseUrl,
-          dashboardUrl: signup.dashboard_url,
-          email: email as string,
-          org_id: validation.org_id,
-          team_id: validation.team_id,
-          device_id: validation.device_id,
-          connectedAt: new Date().toISOString(),
-        });
+        console.log(chalk.dim('  Starting Reins Cloud login...'));
+        const login = await runCliLoginFlow({ baseUrl });
+        console.log(chalk.dim('  Pulling initial policies...'));
 
         // Pull initial policies
-        const bundle = await fetchPolicies(signup.api_key, baseUrl);
+        const bundle = await fetchPolicies(login.session.access_token, baseUrl);
         const policiesPath = path.join(REINS_DATA_DIR, 'policies.json');
         await fs.writeJson(policiesPath, bundle, { spaces: 2 });
 
         // Merge shell policies
-        const shellRules = await fetchShellPolicies(signup.api_key, baseUrl);
+        const shellRules = await fetchShellPolicies(login.session.access_token, baseUrl);
         if (shellRules.length > 0) {
           bundle.shell_rules = [...bundle.shell_rules, ...shellRules];
           await fs.writeJson(policiesPath, bundle, { spaces: 2 });
         }
 
-        console.log(chalk.green(`✅ Connected to Reins Cloud (${email})`));
-        if (signup.message) {
-          console.log(chalk.dim(`  ${signup.message}`));
-        }
-        console.log(chalk.dim(`  Dashboard: ${signup.dashboard_url}`));
+        console.log(chalk.dim(`  Dashboard: ${login.dashboardUrl}`));
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
         warnings.push(`Reins Cloud connection failed: ${msg}`);

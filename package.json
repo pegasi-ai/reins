@@ -23,8 +23,7 @@
     "ai-agents",
     "openclaw",
     "human-in-the-loop",
-    "runtime-interception",
-    "winston": "^3.11.0"
+    "runtime-interception"
   ],
   "author": "Kevin Wu <kevin@usepegasi.com>",
   "license": "Apache-2.0",
@@ -37,7 +36,6 @@
     "commander": "^11.1.0",
     "fs-extra": "^11.2.0",
     "inquirer": "^9.2.12",
-    "scarf": "^0.0.10",
     "winston": "^3.11.0"
   },
   "devDependencies": {

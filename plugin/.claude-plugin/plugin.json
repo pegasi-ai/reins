@@ -1,7 +1,7 @@
 {
   "name": "reins",
   "description": "Runtime security for AI agents. Blocks destructive actions before execution, routes high-risk operations through human approval, and maintains an immutable audit trail. Covers OWASP MCP Top 10, ASI Top 10, and Agentic Skills Top 10.",
-  "version": "0.0.23",
+  "version": "0.0.24",
   "author": {
     "name": "Pegasi"
   },
@@ -9,7 +9,6 @@
   "repository": "https://github.com/pegasi-ai/reins",
   "license": "Apache-2.0",
   "skills": "./skills",
-  "hooks": "./hooks/hooks.json",
   "keywords": [
     "security",
     "ai-agents",

@@ -133,7 +133,7 @@ export async function connectWatchtowerAccount(
 
 export async function uploadWatchtowerArtifact(
   baseUrl: string,
-  apiKey: string,
+  accessToken: string,
   artifact: WatchtowerScanArtifact
 ): Promise<{ ingestUrl: string }> {
   const ingestUrl = buildWatchtowerApiUrl(baseUrl, '/api/scan-artifacts/ingest');
@@ -141,7 +141,7 @@ export async function uploadWatchtowerArtifact(
     method: 'POST',
     headers: {
       'content-type': 'application/json',
-      'x-api-key': apiKey,
+      Authorization: `Bearer ${accessToken}`,
     },
     body: JSON.stringify(artifact),
   });
