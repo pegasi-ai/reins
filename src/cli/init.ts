@@ -590,29 +590,6 @@ export async function initWizard(options: InitWizardOptions = {}): Promise<InitS
     }
   }
 
-  if (!nonInteractive && !jsonMode) {
-    console.log('');
-    console.log(chalk.bold('Step 7: Running first security scan...'));
-    console.log('');
-
-    try {
-      await runSetupScan();
-
-      try {
-        await maybeOfferWatchtowerSchedule();
-      } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        warnings.push(`Scheduled scan setup failed: ${message}`);
-        console.log(chalk.yellow(`⚠️  Scheduled scan setup failed: ${message}`));
-      }
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      warnings.push(`Initial security scan failed: ${message}`);
-      console.log(chalk.yellow(`⚠️  Initial security scan failed: ${message}`));
-      console.log(chalk.dim('  You can retry manually with: clawreins scan'));
-    }
-  }
-
   if (!jsonMode) {
     console.log('');
     console.log(chalk.bold.green('═'.repeat(80)));
