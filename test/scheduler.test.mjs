@@ -22,7 +22,7 @@ const {
 
 test('buildWatchtowerCronEntry builds a daily monitor cron entry with marker', () => {
   const entry = buildWatchtowerCronEntry({
-    cliScriptPath: '/opt/clawreins/dist/cli/index.js',
+    cliScriptPath: '/opt/reins/dist/cli/index.js',
     homeDir: '/Users/tester',
     nodePath: '/usr/local/bin/node',
     openclawHome: '/Users/tester/.openclaw',
@@ -34,14 +34,14 @@ test('buildWatchtowerCronEntry builds a daily monitor cron entry with marker', (
   assert.match(entry, new RegExp(WATCHTOWER_CRON_MARKER.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
 });
 
-test('mergeCrontabContents replaces the existing clawreins watchtower line', () => {
+test('mergeCrontabContents replaces the existing reins watchtower line', () => {
   const current = [
     'MAILTO=""',
     '0 8 * * * /usr/bin/true # some-other-job',
     `0 9 * * * /usr/bin/node /old/index.js scan --monitor >> /tmp/log 2>&1 ${WATCHTOWER_CRON_MARKER}`,
     '',
   ].join('\n');
-  const nextEntry = '0 9 * * * /usr/bin/node /new/index.js scan --monitor >> /tmp/new.log 2>&1 # clawreins-watchtower-scan';
+  const nextEntry = '0 9 * * * /usr/bin/node /new/index.js scan --monitor >> /tmp/new.log 2>&1 # reins-watchtower-scan';
   const merged = mergeCrontabContents(current, nextEntry);
 
   assert.equal(hasWatchtowerCronJob(merged), true);
@@ -53,7 +53,7 @@ test('mergeCrontabContents replaces the existing clawreins watchtower line', () 
 
 test('buildWatchtowerLaunchAgentPlist builds a user LaunchAgent for daily scans', () => {
   const plist = buildWatchtowerLaunchAgentPlist({
-    cliScriptPath: '/opt/clawreins/dist/cli/index.js',
+    cliScriptPath: '/opt/reins/dist/cli/index.js',
     homeDir: '/Users/tester',
     nodePath: '/usr/local/bin/node',
     openclawHome: '/Users/tester/.openclaw',
@@ -68,7 +68,7 @@ test('buildWatchtowerLaunchAgentPlist builds a user LaunchAgent for daily scans'
 });
 
 test('installWatchtowerCronJob reads and writes crontab content via injected spawnSync', async () => {
-  const tempRoot = mkdtempSync(path.join(os.tmpdir(), 'clawreins-scheduler-'));
+  const tempRoot = mkdtempSync(path.join(os.tmpdir(), 'reins-scheduler-'));
   const openclawHome = path.join(tempRoot, '.openclaw');
   const calls = [];
   const fakeSpawnSync = (command, args, options = {}) => {
@@ -98,7 +98,7 @@ test('installWatchtowerCronJob reads and writes crontab content via injected spa
   };
 
   const result = await installWatchtowerCronJob({
-    cliScriptPath: '/opt/clawreins/dist/cli/index.js',
+    cliScriptPath: '/opt/reins/dist/cli/index.js',
     homeDir: tempRoot,
     nodePath: '/usr/local/bin/node',
     openclawHome,
@@ -111,11 +111,11 @@ test('installWatchtowerCronJob reads and writes crontab content via injected spa
   assert.equal(calls[0].args[0], '-l');
   assert.equal(calls[1].args[0], '-');
   assert.match(calls[1].options.input, /scan --monitor/);
-  assert.match(calls[1].options.input, /# clawreins-watchtower-scan/);
+  assert.match(calls[1].options.input, /# reins-watchtower-scan/);
 });
 
 test('installWatchtowerLaunchAgent writes plist and loads it with launchctl', async () => {
-  const tempRoot = mkdtempSync(path.join(os.tmpdir(), 'clawreins-launchagent-'));
+  const tempRoot = mkdtempSync(path.join(os.tmpdir(), 'reins-launchagent-'));
   const openclawHome = path.join(tempRoot, '.openclaw');
   const calls = [];
   const fakeSpawnSync = (command, args) => {
@@ -145,7 +145,7 @@ test('installWatchtowerLaunchAgent writes plist and loads it with launchctl', as
   };
 
   const result = await installWatchtowerLaunchAgent({
-    cliScriptPath: '/opt/clawreins/dist/cli/index.js',
+    cliScriptPath: '/opt/reins/dist/cli/index.js',
     homeDir: tempRoot,
     nodePath: '/usr/local/bin/node',
     openclawHome,
@@ -174,7 +174,7 @@ test('installWatchtowerLaunchAgent writes plist and loads it with launchctl', as
 });
 
 test('installWatchtowerSchedule chooses LaunchAgent on macOS', async () => {
-  const tempRoot = mkdtempSync(path.join(os.tmpdir(), 'clawreins-schedule-mac-'));
+  const tempRoot = mkdtempSync(path.join(os.tmpdir(), 'reins-schedule-mac-'));
   const calls = [];
   const fakeSpawnSync = (command, args) => {
     calls.push({ args, command });

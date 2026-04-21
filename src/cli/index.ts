@@ -16,6 +16,18 @@ import { disableCommand, enableCommand } from './commands/toggle';
 import { toolShieldSyncCommand } from './commands/toolshield-sync';
 import { upgradeCommand } from './commands/upgrade';
 import { scanCommand } from './scan';
+import { statusCommand } from './commands/status';
+import { syncCommand } from './commands/sync';
+
+function getCliVersion(): string {
+  try {
+    const packageJsonPath = path.resolve(__dirname, '..', '..', 'package.json');
+    const packageJson = JSON.parse(fs.readFileSync(packageJsonPath, 'utf8')) as { version?: unknown };
+    return typeof packageJson.version === 'string' ? packageJson.version : '1.0.0';
+  } catch {
+    return '1.0.0';
+  }
+}
 
 function getCliVersion(): string {
   try {
@@ -29,13 +41,13 @@ function getCliVersion(): string {
 
 const program = new Command();
 
-program.name('clawreins').description('ClawReins is the runtime security layer for OpenClaw..').version(getCliVersion());
+program.name('reins').description('Reins — runtime security and policy enforcement for Claude Code.').version(getCliVersion());
 
-// Initialize/configure ClawReins with OpenClaw
+// Initialize/configure Reins
 program
   .command('init')
   .alias('configure')
-  .description('Setup ClawReins with OpenClaw (interactive wizard)')
+  .description('Setup Reins (interactive wizard)')
   .option('--non-interactive', 'Run without prompts using defaults/flags')
   .option('--json', 'Output machine-readable JSON only')
   .option('--security-level <level>', 'Security preset: permissive|balanced|strict|custom')
@@ -59,11 +71,8 @@ program
 // Reset stats
 program.command('reset').description('Reset statistics').action(resetCommand);
 
-// Disable ClawReins
-program.command('disable').description('Temporarily disable ClawReins').action(disableCommand);
-
-// Enable ClawReins
-program.command('enable').description('Re-enable ClawReins').action(enableCommand);
+program.command('disable').description('Temporarily disable Reins').action(disableCommand);
+program.command('enable').description('Re-enable Reins').action(enableCommand);
 
 // Sync ToolShield experiences into OpenClaw AGENTS.md
 program
@@ -76,14 +85,13 @@ program
   .option('--append', 'Append without unloading existing ToolShield section')
   .action(toolShieldSyncCommand);
 
-// Upgrade/reinstall ClawReins plugin in OpenClaw
 program
   .command('upgrade')
   .alias('update')
-  .description('Upgrade ClawReins plugin in OpenClaw (reinstall + restart)')
-  .option('--tag <tag>', 'NPM dist-tag to install', 'beta')
+  .description('Upgrade Reins plugin in OpenClaw (reinstall + restart)')
+  .option('--tag <tag>', 'NPM dist-tag to install', 'latest')
   .option('--version <version>', 'Exact version to install (overrides --tag)')
-  .option('--configure', 'Run clawreins configure after install')
+  .option('--configure', 'Run reins configure after install')
   .option('--no-restart', 'Skip openclaw gateway restart')
   .action(upgradeCommand);
 
@@ -99,5 +107,8 @@ program
   .option('--alert-command <command>', 'Run a notification command when monitor mode detects drift')
   .option('--yes', 'Skip the confirmation prompt when using --fix')
   .action(scanCommand);
+
+program.command('status').description('Show hook and Watchtower connection status').action(statusCommand);
+program.command('sync').description('Pull latest policies from Watchtower and flush pending audit entries').action(syncCommand);
 
 program.parse();

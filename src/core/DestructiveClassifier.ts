@@ -1,5 +1,5 @@
 /**
- * ClawReins Destructive Action Classifier
+ * Reins destructive action classifier.
  * Lightweight regex/heuristic classifier for pre-execution gating.
  */
 
@@ -49,11 +49,11 @@ function parseBulkThreshold(value: string | undefined): number {
 }
 
 export function getBulkThreshold(): number {
-  return parseBulkThreshold(process.env.CLAWREINS_BULK_THRESHOLD);
+  return parseBulkThreshold(process.env.REINS_BULK_THRESHOLD || process.env.CLAWREINS_BULK_THRESHOLD);
 }
 
 export function isDestructiveGatingEnabled(): boolean {
-  return (process.env.CLAWREINS_DESTRUCTIVE_GATING || 'on').toLowerCase() !== 'off';
+  return (process.env.REINS_DESTRUCTIVE_GATING || process.env.CLAWREINS_DESTRUCTIVE_GATING || 'on').toLowerCase() !== 'off';
 }
 
 function stableStringify(value: unknown): string {

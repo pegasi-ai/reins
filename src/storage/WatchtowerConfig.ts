@@ -1,8 +1,7 @@
 import { chmodSync } from 'fs';
 import fs from 'fs-extra';
-import os from 'os';
-import path from 'path';
 import { logger } from '../core/Logger';
+import { getDataPath, getPreferredDataPath, getReinsDataDir } from '../core/data-dir';
 
 export const DEFAULT_WATCHTOWER_BASE_URL = 'https://app.pegasi.ai';
 
@@ -12,9 +11,12 @@ export interface WatchtowerSettings {
   connectedAt?: string;
   dashboardUrl?: string;
   email?: string;
+  org_id?: string;
+  team_id?: string;
+  device_id?: string;
 }
 
-interface ClawreinsConfigFile {
+interface ReinsConfigFile {
   watchtower?: WatchtowerSettings;
   [key: string]: unknown;
 }
@@ -27,30 +29,25 @@ export interface WatchtowerCredentials {
   source: 'config' | 'env';
 }
 
-function getWatchtowerConfigDir(): string {
-  const openclawHome = process.env.OPENCLAW_HOME || path.join(os.homedir(), '.openclaw');
-  return path.join(openclawHome, 'clawreins');
-}
-
 function getWatchtowerConfigFilePath(): string {
-  return path.join(getWatchtowerConfigDir(), 'config.json');
+  return getDataPath('config.json');
 }
 
-async function loadClawreinsConfigFile(): Promise<ClawreinsConfigFile> {
+async function loadReinsConfigFile(): Promise<ReinsConfigFile> {
   const configFile = getWatchtowerConfigFilePath();
-  await fs.ensureDir(path.dirname(configFile));
+  await fs.ensureDir(getReinsDataDir());
 
   if (!(await fs.pathExists(configFile))) {
     return {};
   }
 
   const raw = (await fs.readJson(configFile)) as unknown;
-  return raw && typeof raw === 'object' ? (raw as ClawreinsConfigFile) : {};
+  return raw && typeof raw === 'object' ? (raw as ReinsConfigFile) : {};
 }
 
 export async function loadWatchtowerSettings(): Promise<WatchtowerSettings | null> {
   try {
-    const config = await loadClawreinsConfigFile();
+    const config = await loadReinsConfigFile();
     const settings = config.watchtower;
     return settings && typeof settings === 'object' ? settings : null;
   } catch (error) {
@@ -60,15 +57,15 @@ export async function loadWatchtowerSettings(): Promise<WatchtowerSettings | nul
 }
 
 export async function saveWatchtowerSettings(settings: WatchtowerSettings): Promise<string> {
-  const configFile = getWatchtowerConfigFilePath();
-  const config = await loadClawreinsConfigFile();
+  const configFile = getPreferredDataPath('config.json');
+  const config = await loadReinsConfigFile();
   config.watchtower = {
     ...config.watchtower,
     ...settings,
     connectedAt: settings.connectedAt || new Date().toISOString(),
   };
 
-  await fs.ensureDir(path.dirname(configFile));
+  await fs.ensureDir(getReinsDataDir());
   await fs.writeJson(configFile, config, { spaces: 2 });
 
   try {
@@ -81,8 +78,12 @@ export async function saveWatchtowerSettings(settings: WatchtowerSettings): Prom
 }
 
 export async function resolveWatchtowerCredentials(): Promise<WatchtowerCredentials | null> {
-  const envBaseUrl = process.env.CLAWREINS_WATCHTOWER_BASE_URL?.trim();
-  const envApiKey = process.env.CLAWREINS_WATCHTOWER_API_KEY?.trim();
+  const envBaseUrl =
+    process.env.REINS_WATCHTOWER_BASE_URL?.trim()
+    || process.env.CLAWREINS_WATCHTOWER_BASE_URL?.trim();
+  const envApiKey =
+    process.env.REINS_WATCHTOWER_API_KEY?.trim()
+    || process.env.CLAWREINS_WATCHTOWER_API_KEY?.trim();
 
   if (envBaseUrl && envApiKey) {
     return {

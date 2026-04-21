@@ -4,8 +4,9 @@ import os from 'os';
 import path from 'path';
 import { getOpenClawPaths } from '../plugin/config-manager';
 
-export const WATCHTOWER_CRON_MARKER = '# clawreins-watchtower-scan';
-export const WATCHTOWER_LAUNCH_AGENT_LABEL = 'ai.pegasi.clawreins.watchtower-scan';
+export const WATCHTOWER_CRON_MARKER = '# reins-watchtower-scan';
+export const LEGACY_WATCHTOWER_CRON_MARKER = '# clawreins-watchtower-scan';
+export const WATCHTOWER_LAUNCH_AGENT_LABEL = 'ai.pegasi.reins.watchtower-scan';
 const DEFAULT_CRON_SCHEDULE = '0 9 * * *';
 
 export interface InstallScheduleOptions {
@@ -58,7 +59,7 @@ function resolveUid(options: InstallScheduleOptions): number {
 }
 
 function getLogPath(options: InstallScheduleOptions): string {
-  return path.join(resolveOpenclawHome(options), 'clawreins', 'scan-monitor.log');
+  return path.join(resolveOpenclawHome(options), 'reins', 'scan-monitor.log');
 }
 
 export function buildWatchtowerCronEntry(options: InstallScheduleOptions = {}): string {
@@ -86,14 +87,18 @@ export function mergeCrontabContents(currentContents: string, cronEntry: string)
   const preservedLines = currentContents
     .split('\n')
     .map((line) => line.trimEnd())
-    .filter((line) => line.length > 0 && !line.includes(WATCHTOWER_CRON_MARKER));
+    .filter(
+      (line) => line.length > 0 && !line.includes(WATCHTOWER_CRON_MARKER) && !line.includes(LEGACY_WATCHTOWER_CRON_MARKER)
+    );
 
   preservedLines.push(cronEntry);
   return `${preservedLines.join('\n')}\n`;
 }
 
 export function hasWatchtowerCronJob(crontabContents: string): boolean {
-  return crontabContents.split('\n').some((line) => line.includes(WATCHTOWER_CRON_MARKER));
+  return crontabContents
+    .split('\n')
+    .some((line) => line.includes(WATCHTOWER_CRON_MARKER) || line.includes(LEGACY_WATCHTOWER_CRON_MARKER));
 }
 
 export function getWatchtowerLaunchAgentPath(options: InstallScheduleOptions = {}): string {
@@ -101,7 +106,7 @@ export function getWatchtowerLaunchAgentPath(options: InstallScheduleOptions = {
 }
 
 export function getWatchtowerLaunchAgentSourcePath(options: InstallScheduleOptions = {}): string {
-  return path.join(resolveOpenclawHome(options), 'clawreins', 'launchagents', `${WATCHTOWER_LAUNCH_AGENT_LABEL}.plist`);
+  return path.join(resolveOpenclawHome(options), 'reins', 'launchagents', `${WATCHTOWER_LAUNCH_AGENT_LABEL}.plist`);
 }
 
 export function buildWatchtowerLaunchAgentPlist(options: InstallScheduleOptions = {}): string {
@@ -169,7 +174,7 @@ export async function installWatchtowerCronJob(options: InstallScheduleOptions =
   const cronEntry = buildWatchtowerCronEntry(options);
   const openclawHome = resolveOpenclawHome(options);
 
-  await fs.ensureDir(path.join(openclawHome, 'clawreins'));
+  await fs.ensureDir(path.join(openclawHome, 'reins'));
 
   const current = spawn('crontab', ['-l'], { encoding: 'utf8' });
   const stderr = `${current.stderr || ''}`.trim();
@@ -209,7 +214,7 @@ export async function installWatchtowerLaunchAgent(options: InstallScheduleOptio
 
   await fs.ensureDir(path.dirname(sourcePlistPath));
   await fs.ensureDir(path.dirname(plistPath));
-  await fs.ensureDir(path.join(resolveOpenclawHome(options), 'clawreins'));
+  await fs.ensureDir(path.join(resolveOpenclawHome(options), 'reins'));
   const alreadyInstalled = await fs.pathExists(plistPath);
   await fs.writeFile(sourcePlistPath, plistContents, 'utf8');
   await fs.writeFile(plistPath, plistContents, 'utf8');

@@ -1,13 +1,12 @@
 /**
- * ClawReins - The intervention layer for OpenClaw
- * Public API Exports
+ * Reins public API exports.
  */
 
 // Core Components
 export { Interceptor } from './core/Interceptor';
 export { Arbitrator } from './core/Arbitrator';
 export { approvalQueue } from './core/ApprovalQueue';
-export { logger, LOG_PATH, CLAWREINS_DATA_DIR } from './core/Logger';
+export { logger, LOG_PATH, REINS_DATA_DIR, CLAWREINS_DATA_DIR } from './core/Logger';
 
 // Storage
 export { PolicyStore } from './storage/PolicyStore';
@@ -20,10 +19,10 @@ export { BrowserSessionStore } from './storage/BrowserSessionStore';
 export type { SessionInjectionResult } from './storage/BrowserSessionStore';
 
 // Plugin
-export { default as ClawReinsPlugin } from './plugin/index';
-export type { ClawReinsConfig } from './plugin/index';
-export { ClawReinsManifest } from './plugin/index';
-export type { ClawReinsPluginManifest } from './plugin/index';
+export { default as ReinsPlugin } from './plugin/index';
+export type { ReinsConfig } from './plugin/index';
+export { ReinsManifest } from './plugin/index';
+export type { ReinsPluginManifest } from './plugin/index';
 export {
   createToolCallHook,
   getToolMapping,

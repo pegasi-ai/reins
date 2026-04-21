@@ -1,7 +1,7 @@
 /**
- * ToolShield integration helpers for ClawReins.
+ * ToolShield integration helpers for Reins.
  *
- * Goal: make ToolShield protection available by default during `clawreins init`
+ * Goal: make ToolShield protection available by default during `reins init`
  * and easy to re-run via a dedicated command.
  */
 

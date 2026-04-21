@@ -1,5 +1,5 @@
 /**
- * ClawReins Plugin Entry Point
+ * Reins Plugin Entry Point
  * OpenClaw plugin integration.
  *
  * IMPORTANT: register() must be SYNCHRONOUS — the OpenClaw gateway
@@ -25,13 +25,13 @@ import { createApproveCommand, createDenyCommand } from './approval-commands';
 import path from 'path';
 import { readFileSync } from 'fs';
 
-export interface ClawReinsConfig {
+export interface ReinsConfig {
   enabled?: boolean;
   defaultAction?: 'ALLOW' | 'DENY' | 'ASK';
   fallbackChannel?: FallbackChannel;
 }
 
-export interface ClawReinsPluginManifest {
+export interface ReinsPluginManifest {
   id: string;
   displayName: string;
   version: string;
@@ -50,17 +50,17 @@ function getPackageVersion(): string {
   }
 }
 
-export const ClawReinsManifest: ClawReinsPluginManifest = {
-  id: 'clawreins',
-  displayName: 'Clawreins',
+export const ReinsManifest: ReinsPluginManifest = {
+  id: 'reins',
+  displayName: 'Reins',
   version: getPackageVersion(),
   configure: {
-    command: 'clawreins configure',
+    command: 'reins configure',
   },
 };
 
 // ---------------------------------------------------------------------------
-// Minimal OpenClaw plugin API surface used by ClawReins.
+// Minimal OpenClaw plugin API surface used by Reins.
 // All methods are optional — the gateway may not support all of them.
 // ---------------------------------------------------------------------------
 
@@ -171,12 +171,12 @@ function extractMessageText(
 // ---------------------------------------------------------------------------
 
 export default {
-  id: 'clawreins',
-  name: 'ClawReins',
-  manifest: ClawReinsManifest,
+  id: 'reins',
+  name: 'Reins',
+  manifest: ReinsManifest,
 
   register(api: OpenClawPluginApi): void {
-    logger.info('ClawReins plugin loading...');
+    logger.info('Reins plugin loading...');
 
     try {
       const policy = PolicyStore.loadSync();
@@ -191,11 +191,12 @@ export default {
       // OOB notifier: initialise with runtime send functions + gateway config
       // -------------------------------------------------------------------
       // OpenClaw passes the full openclaw.json as api.config; the plugin's own
-      // config section is nested at plugins.entries.clawreins.config.
+      // config section is nested at plugins.entries.reins.config.
       const globalConfig = api.config as {
-        plugins?: { entries?: { clawreins?: { config?: ClawReinsConfig } } };
+        plugins?: { entries?: { reins?: { config?: ReinsConfig }; clawreins?: { config?: ReinsConfig } } };
       } | undefined;
-      const pluginConfig = globalConfig?.plugins?.entries?.clawreins?.config;
+      const pluginConfig = globalConfig?.plugins?.entries?.reins?.config
+        || globalConfig?.plugins?.entries?.clawreins?.config;
       logger.info('[plugin] pluginConfig at init', { pluginConfig: JSON.stringify(pluginConfig) });
       initNotifier(api.runtime, api.config, pluginConfig?.fallbackChannel);
 
@@ -294,9 +295,9 @@ export default {
         'deny-command'
       );
 
-      logger.info('ClawReins: registration complete');
+      logger.info('Reins: registration complete');
     } catch (error) {
-      logger.error('Failed to initialize ClawReins plugin', { error });
+      logger.error('Failed to initialize Reins plugin', { error });
       throw error;
     }
   },

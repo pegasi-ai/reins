@@ -1,7 +1,7 @@
 {
-  "id": "clawreins",
-  "name": "ClawReins",
-  "description": "ClawReins is the runtime security layer for OpenClaw.",
+  "id": "reins",
+  "name": "Reins",
+  "description": "Reins — runtime security and policy enforcement for computer-using agents.",
   "version": "1.0.0",
   "main": "dist/plugin/index.js",
   "hooks": ["before_tool_call"],

@@ -89,10 +89,10 @@ fi
 mkdir -p "$(dirname "$AGENTS_FILE")"
 touch "$AGENTS_FILE"
 
-POLICY_FILE="$OPENCLAW_HOME/clawreins/policy.json"
+POLICY_FILE="$OPENCLAW_HOME/reins/policy.json"
 if [[ "$DO_BACKUP" -eq 1 ]]; then
   TS="$(date +%Y%m%d-%H%M%S)"
-  BACKUP_DIR="$OPENCLAW_HOME/clawreins/backups/$TS"
+  BACKUP_DIR="$OPENCLAW_HOME/reins/backups/$TS"
   mkdir -p "$BACKUP_DIR"
 
   cp "$AGENTS_FILE" "$BACKUP_DIR/AGENTS.md.before"

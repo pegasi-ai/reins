@@ -1,5 +1,5 @@
 /**
- * ClawReins Security Scan Command
+ * Reins Security Scan Command
  */
 
 import { spawn } from 'child_process';
@@ -142,7 +142,7 @@ export async function scanCommand(options: ScanCommandOptions): Promise<void> {
 export async function runSetupScan(): Promise<SetupScanResult> {
   const scanner = new SecurityScanner();
   const report = await scanner.run();
-  const command = 'clawreins init';
+  const command = 'reins init';
 
   renderTerminalReport(report);
 
@@ -213,7 +213,7 @@ async function maybeOfferFix(
   }
 
   console.log(chalk.bold('Auto-Fix Available:'));
-  console.log(`  ${chalk.dim('Run `clawreins scan --fix` to apply supported remediations.')}`);
+  console.log(`  ${chalk.dim('Run `reins scan --fix` to apply supported remediations.')}`);
 
   if (!process.stdin.isTTY) {
     console.log('');
@@ -323,8 +323,21 @@ async function maybeSendMonitorAlert(
   const shell = process.env.SHELL || (process.platform === 'win32' ? process.env.COMSPEC || 'cmd.exe' : '/bin/sh');
   const shellArgs = process.platform === 'win32' ? ['/d', '/s', '/c', alertCommand] : ['-c', alertCommand];
   const timeoutMs = getAlertTimeoutMs();
+  const alertSummary = buildAlertSummary(comparison, report);
+  const worsenedChecks = comparison.worsenedChecks.map((change) => change.id).join(',');
   const env = {
     ...process.env,
+    REINS_SCAN_ALERT: '1',
+    REINS_SCAN_VERDICT: report.verdict,
+    REINS_SCAN_SCORE: String(report.score),
+    REINS_SCAN_TOTAL: String(report.total),
+    REINS_SCAN_TIMESTAMP: report.timestamp,
+    REINS_SCAN_REPORT_PATH: reportPath,
+    REINS_SCAN_REPORT_URL: toFileUrl(reportPath),
+    REINS_SCAN_STATE_PATH: getScanStatePath(),
+    REINS_SCAN_CONFIG_BASELINE_PATH: getConfigBaselinePath(),
+    REINS_SCAN_SUMMARY: alertSummary,
+    REINS_SCAN_WORSENED_CHECKS: worsenedChecks,
     CLAWREINS_SCAN_ALERT: '1',
     CLAWREINS_SCAN_VERDICT: report.verdict,
     CLAWREINS_SCAN_SCORE: String(report.score),
@@ -334,8 +347,8 @@ async function maybeSendMonitorAlert(
     CLAWREINS_SCAN_REPORT_URL: toFileUrl(reportPath),
     CLAWREINS_SCAN_STATE_PATH: getScanStatePath(),
     CLAWREINS_SCAN_CONFIG_BASELINE_PATH: getConfigBaselinePath(),
-    CLAWREINS_SCAN_SUMMARY: buildAlertSummary(comparison, report),
-    CLAWREINS_SCAN_WORSENED_CHECKS: comparison.worsenedChecks.map((change) => change.id).join(','),
+    CLAWREINS_SCAN_SUMMARY: alertSummary,
+    CLAWREINS_SCAN_WORSENED_CHECKS: worsenedChecks,
   };
 
   console.log(chalk.bold('Alert Command:'));
@@ -521,7 +534,7 @@ function buildAlertSummary(comparison: DriftComparison, report: ScanReport): str
   const configChanges = comparison.configChanges.map((change) => `${change.kind.toUpperCase()}: ${change.path}`);
 
   const parts = [
-    `ClawReins drift detected.`,
+    `Reins drift detected.`,
     `Verdict: ${report.verdict}.`,
     `Score: ${report.score}/${report.total}.`,
   ];
@@ -537,7 +550,7 @@ function buildAlertSummary(comparison: DriftComparison, report: ScanReport): str
 }
 
 function getAlertTimeoutMs(): number {
-  const raw = process.env.CLAWREINS_ALERT_TIMEOUT_MS;
+  const raw = process.env.REINS_ALERT_TIMEOUT_MS || process.env.CLAWREINS_ALERT_TIMEOUT_MS;
   const parsed = raw ? Number.parseInt(raw, 10) : NaN;
   return Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_ALERT_TIMEOUT_MS;
 }
@@ -561,7 +574,7 @@ async function confirmFix(): Promise<boolean> {
 
 function renderTerminalReport(report: ScanReport): void {
   console.log('');
-  console.log(chalk.bold.cyan('🦞 ClawReins Security Scan'));
+  console.log(chalk.bold.cyan('🦞 Reins Security Scan'));
   console.log(chalk.cyan('──────────────────────────────────────────'));
   renderChecksOnly(report);
 }
@@ -755,7 +768,7 @@ async function maybeUploadWatchtowerArtifact(
     if (!quiet) {
       console.log(chalk.bold('Watchtower Upload:'));
       console.log(
-        `  ${chalk.dim('Upload skipped because Watchtower is not connected. Use CLAWREINS_WATCHTOWER_BASE_URL + CLAWREINS_WATCHTOWER_API_KEY for CI/CD and other headless environments.')}`
+        `  ${chalk.dim('Upload skipped because Watchtower is not connected. Use REINS_WATCHTOWER_BASE_URL + REINS_WATCHTOWER_API_KEY for CI/CD and other headless environments.')}`
       );
     }
     return {
@@ -793,7 +806,9 @@ async function maybeUploadWatchtowerArtifact(
 export async function enrollWatchtowerWithEmail(
   email: string,
   artifact: WatchtowerScanArtifact,
-  baseUrl = process.env.CLAWREINS_WATCHTOWER_BASE_URL?.trim() || DEFAULT_WATCHTOWER_BASE_URL
+  baseUrl = process.env.REINS_WATCHTOWER_BASE_URL?.trim()
+    || process.env.CLAWREINS_WATCHTOWER_BASE_URL?.trim()
+    || DEFAULT_WATCHTOWER_BASE_URL
 ): Promise<{ configPath: string | null; dashboardUrl: string; message?: string; status: 'created' | 'existing' }> {
   const enrollment = await connectWatchtowerAccount(baseUrl, email, artifact);
   let configPath: string | null = null;
@@ -864,7 +879,7 @@ async function maybeConnectWatchtowerInteractively(
     } else {
       console.log(`  ${chalk.yellow('Account already exists, and no new API key was issued.')}`);
     }
-    console.log(`  ${chalk.yellow('Automatic upload will work once the original API key is available in ~/.openclaw/clawreins/config.json or via env vars.')}`);
+    console.log(`  ${chalk.yellow('Automatic upload will work once the original API key is available in ~/.openclaw/reins/config.json or via env vars.')}`);
 
     return await resolveWatchtowerCredentials();
   } catch (error) {
@@ -887,7 +902,7 @@ function buildHtmlReport(report: ScanReport): string {
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>ClawReins Security Scan</title>
+  <title>Reins Security Scan</title>
   <style>
     :root{color-scheme:dark}*{box-sizing:border-box}body{margin:0;padding:32px;background:#0d1117;color:#c9d1d9;font:16px/1.5 ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,"Liberation Mono","Courier New",system-ui,monospace}
     main{max-width:960px;margin:0 auto}.pass{color:#3fb950}.warn{color:#d29922}.fail{color:#f85149}.muted{color:#8b949e}
@@ -902,7 +917,7 @@ function buildHtmlReport(report: ScanReport): string {
     <section class="panel">
       <div class="header">
         <div>
-          <h1 style="margin:0 0 8px">ClawReins Security Scan</h1>
+          <h1 style="margin:0 0 8px">Reins Security Scan</h1>
           <div class="muted">Scanned at ${escapeHtml(report.timestamp)}</div>
         </div>
         <span class="badge ${verdictClass}">${escapeHtml(report.verdict)}</span>
@@ -912,7 +927,7 @@ function buildHtmlReport(report: ScanReport): string {
       <div class="checks">
 ${checks}
       </div>
-      <footer>Secured by <a href="https://github.com/pegasi-ai/clawreins">ClawReins</a></footer>
+      <footer>Secured by <a href="https://github.com/pegasi-ai/reins">Reins</a></footer>
     </section>
   </main>
 </body>
@@ -982,5 +997,5 @@ function exitCodeFor(report: ScanReport): 0 | 1 | 2 {
 
 function renderScanCommand(): string {
   const argv = process.argv.slice(2);
-  return argv.length > 0 ? `clawreins ${argv.join(' ')}` : 'clawreins scan';
+  return argv.length > 0 ? `reins ${argv.join(' ')}` : 'reins scan';
 }

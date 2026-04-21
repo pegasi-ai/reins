@@ -1,7 +1,7 @@
 /**
  * OOB (Out-of-Band) Approval Notifier
  *
- * When ClawReins blocks a tool call in channel mode, this module sends an
+ * When Reins blocks a tool call in channel mode, this module sends an
  * approval notification directly to the human's channel — bypassing the agent
  * so the agent never sees the token and cannot self-approve.
  *
@@ -94,7 +94,7 @@ export async function sendApprovalNotification(
 
   const actionLine = info.summary || `${moduleName}.${methodName}()`;
   const message = [
-    '🛡️ ClawReins: approval needed',
+    '🛡️ Reins: approval needed',
     `Action: ${actionLine}`,
     `/approve ${info.token}  to allow`,
     `/deny ${info.token}  to block`,

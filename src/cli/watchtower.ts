@@ -20,11 +20,11 @@ export function buildWatchtowerApiUrl(baseUrl: string, endpointPath: string): st
   try {
     parsedBaseUrl = new URL(baseUrl);
   } catch {
-    throw new Error('CLAWREINS_WATCHTOWER_BASE_URL is not a valid URL.');
+    throw new Error('REINS_WATCHTOWER_BASE_URL is not a valid URL.');
   }
 
   if (parsedBaseUrl.protocol !== 'https:' && !(parsedBaseUrl.protocol === 'http:' && isLoopbackHost(parsedBaseUrl.hostname))) {
-    throw new Error('CLAWREINS_WATCHTOWER_BASE_URL must use HTTPS unless it targets localhost, 127.0.0.1, or ::1.');
+    throw new Error('REINS_WATCHTOWER_BASE_URL must use HTTPS unless it targets localhost, 127.0.0.1, or ::1.');
   }
 
   parsedBaseUrl.pathname = `${parsedBaseUrl.pathname.replace(/\/+$/, '')}${endpointPath}`;

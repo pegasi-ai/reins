@@ -1,5 +1,5 @@
 /**
- * ClawReins Audit Command
+ * Reins Audit Command
  */
 
 import chalk from 'chalk';
@@ -9,7 +9,7 @@ import { logger } from '../../core/Logger';
 export async function auditCommand(options: { lines: string }): Promise<void> {
   console.log('');
   console.log(chalk.bold.cyan('═'.repeat(80)));
-  console.log(chalk.bold.cyan('   📋 ClawReins Audit Trail'));
+  console.log(chalk.bold.cyan('   📋 Reins Audit Trail'));
   console.log(chalk.bold.cyan('═'.repeat(80)));
   console.log('');
 

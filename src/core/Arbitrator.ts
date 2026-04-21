@@ -1,5 +1,5 @@
 /**
- * ClawReins Arbitrator
+ * Reins Arbitrator
  * The UI/Prompt Logic for Human-in-the-Loop Decisions
  *
  * Modes:
@@ -45,7 +45,7 @@ export class Arbitrator {
       {
         type: 'list',
         name: 'decision',
-        message: chalk.bold.yellow('⚠️  What should ClawReins do?'),
+        message: chalk.bold.yellow('⚠️  What should Reins do?'),
         choices: [
           {
             name: chalk.green('✓ Approve - Allow this action'),
@@ -169,7 +169,7 @@ export class Arbitrator {
     console.log('');
     console.log(chalk.bgRed.white.bold('═'.repeat(80)));
     console.log(
-      chalk.bgRed.white.bold('   🦞 CLAWREINS SECURITY ALERT - HUMAN AUTHORIZATION REQUIRED')
+      chalk.bgRed.white.bold('   🪢 REINS SECURITY ALERT - HUMAN AUTHORIZATION REQUIRED')
     );
     console.log(chalk.bgRed.white.bold('═'.repeat(80)));
     console.log('');

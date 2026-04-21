@@ -1,0 +1,15 @@
+{
+  "name": "reins",
+  "description": "Security controls for AI agents — deterministic policy enforcement, OWASP ASI10 scanning, and audit trails.",
+  "version": "0.0.13",
+  "author": {
+    "name": "Kevin Wu",
+    "email": "kevin@usepegasi.com"
+  },
+  "homepage": "https://reins.sh/docs",
+  "repository": "https://github.com/pegasi-ai/reins",
+  "license": "Apache-2.0",
+  "keywords": ["security", "governance", "ai-agents", "hooks", "audit", "mcp"],
+  "skills": "./plugin/skills/",
+  "hooks": "./plugin/hooks/hooks.json"
+}

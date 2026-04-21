@@ -1,0 +1,16 @@
+{
+  "name": "pegasi",
+  "owner": {
+    "name": "Pegasi",
+    "email": "kevin@usepegasi.com"
+  },
+  "plugins": [
+    {
+      "name": "reins",
+      "description": "Runtime security for AI agents. Blocks destructive actions, routes high-risk operations through human approval, and maintains an immutable audit trail. Covers OWASP MCP Top 10, ASI Top 10, and Agentic Skills Top 10.",
+      "source": ".",
+      "category": "security",
+      "tags": ["security", "governance", "audit", "human-in-the-loop", "owasp", "policy-enforcement"]
+    }
+  ]
+}

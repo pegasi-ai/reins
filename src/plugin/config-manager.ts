@@ -1,6 +1,6 @@
 /**
- * ClawReins Config Manager
- * Manages ClawReins configuration in OpenClaw's openclaw.json
+ * Reins config manager.
+ * Manages Reins configuration in OpenClaw's openclaw.json.
  */
 
 import fs from 'fs-extra';
@@ -15,10 +15,16 @@ export interface OpenClawPaths {
   pluginDir: string;
 }
 
+const LEGACY_PLUGIN_ID = 'clawreins';
+
+function getRecognizedPluginIds(pluginId: string): string[] {
+  return Array.from(new Set([pluginId, 'reins', LEGACY_PLUGIN_ID]));
+}
+
 export function getOpenClawPaths(): OpenClawPaths {
   const openclawHome = process.env.OPENCLAW_HOME || path.join(os.homedir(), '.openclaw');
   const openclawConfig = process.env.OPENCLAW_CONFIG || path.join(openclawHome, 'openclaw.json');
-  const pluginId = process.env.OPENCLAW_PLUGIN_ID || 'clawreins';
+  const pluginId = process.env.OPENCLAW_PLUGIN_ID || 'reins';
   const pluginDir = process.env.OPENCLAW_PLUGIN_DIR || path.join(openclawHome, 'extensions', pluginId);
 
   return {
@@ -83,7 +89,7 @@ export async function saveOpenClawConfig(config: OpenClawConfig): Promise<void> 
 }
 
 /**
- * Register ClawReins plugin in OpenClaw's config (plugins.entries.<pluginId>)
+ * Register Reins plugin in OpenClaw's config (plugins.entries.<pluginId>)
  */
 export async function registerPlugin(
   defaultAction: 'ALLOW' | 'DENY' | 'ASK' = 'ASK'
@@ -112,7 +118,7 @@ export async function registerPlugin(
 }
 
 /**
- * Unregister ClawReins plugin from OpenClaw's config
+ * Unregister Reins plugin from OpenClaw's config
  */
 export async function unregisterPlugin(): Promise<void> {
   const { pluginId } = getOpenClawPaths();
@@ -122,7 +128,9 @@ export async function unregisterPlugin(): Promise<void> {
     return;
   }
 
-  delete config.plugins.entries[pluginId];
+  for (const candidateId of getRecognizedPluginIds(pluginId)) {
+    delete config.plugins.entries[candidateId];
+  }
   await saveOpenClawConfig(config);
   logger.info('Unregistered plugin from OpenClaw config', {
     pluginId,
@@ -131,10 +139,10 @@ export async function unregisterPlugin(): Promise<void> {
 }
 
 /**
- * Check if ClawReins is registered in OpenClaw
+ * Check if Reins is registered in OpenClaw
  */
 export async function isPluginRegistered(): Promise<boolean> {
   const { pluginId } = getOpenClawPaths();
   const config = await loadOpenClawConfig();
-  return !!config?.plugins?.entries?.[pluginId];
+  return getRecognizedPluginIds(pluginId).some((candidateId) => !!config?.plugins?.entries?.[candidateId]);
 }

@@ -10,7 +10,7 @@ function parseArgs(argv) {
   const options = {
     host: '127.0.0.1',
     port: 8787,
-    outputDir: path.join(os.tmpdir(), 'clawreins-watchtower-mock'),
+    outputDir: path.join(os.tmpdir(), 'reins-watchtower-mock'),
   };
 
   for (let index = 0; index < argv.length; index += 1) {

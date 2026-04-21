@@ -1,6 +1,5 @@
 /**
- * ClawReins Type Definitions
- * The strict vocabulary of the security system
+ * Reins type definitions.
  */
 
 /**
@@ -74,7 +73,7 @@ export interface InterventionMetadata {
   destructiveBulkCount?: number;
   /** Optional user-facing target (mailbox/path/host). */
   destructiveTarget?: string;
-  /** Require channel approvals to come via clawreins_respond (fail-secure if unavailable). */
+  /** Require channel approvals to come via reins_respond (fail-secure if unavailable). */
   requiresRespondToolApproval?: boolean;
 }
 
