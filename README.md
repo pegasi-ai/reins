@@ -8,6 +8,8 @@
   </p>
 
   <p>
+    <a href="https://www.npmjs.com/package/clawreins"><img src="https://img.shields.io/npm/v/clawreins.svg" alt="npm"></a>
+    <a href="https://www.npmjs.com/package/clawreins"><img src="https://img.shields.io/npm/dt/clawreins.svg" alt="downloads"></a>
     <a href="https://www.apache.org/licenses/LICENSE-2.0"><img src="https://img.shields.io/badge/License-Apache%202.0-blue.svg" alt="License: Apache 2.0"></a>
     <a href="http://www.typescriptlang.org/"><img src="https://img.shields.io/badge/%3C%2F%3E-TypeScript-%23007ACC.svg" alt="TypeScript"></a>
     <img src="https://img.shields.io/badge/node-%3E%3D18.0.0-brightgreen" alt="Node.js >= 18.0.0">
