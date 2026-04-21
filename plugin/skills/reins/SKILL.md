@@ -4,7 +4,7 @@ description: Use whenever security, policies, governance, guardrails, compliance
 
 # Reins — Runtime Security for Claude Code
 
-Reins enforces deterministic security policies on every agent action via Claude Code PreToolUse and PostToolUse hooks. Policies are evaluated in <50ms with no LLM in the enforcement path.
+Reins enforces deterministic security policies on every agent action, scans your configs for OWASP ASI10 vulnerabilities, and tracks drift over time. Policies evaluate in under 50ms. Works with Claude Code PreToolUse and PostToolUse hooks, OpenClaw, and any MCP-compatible agent.
 
 ## How hooks work
 
@@ -16,7 +16,7 @@ Reins enforces deterministic security policies on every agent action via Claude 
 | `2` | BLOCKED — policy violation | Stop. Explain the block. Suggest a safe alternative. Do NOT retry. |
 | `0` + JSON `decision: WARN` | WARNING — elevated risk | Acknowledge the warning. Proceed with extra caution. |
 
-**PostToolUse** fires after every action (non-blocking). Appends a JSONL entry to `~/.openclaw/reins/decisions.jsonl` and queues it for Watchtower upload.
+**PostToolUse** fires after every action (non-blocking). Appends a JSONL entry to `~/.openclaw/reins/decisions.jsonl` and queues it for Reins Cloud batch upload.
 
 ## What gets enforced
 
@@ -63,20 +63,58 @@ Rules:
 ## CLI reference
 
 ```bash
-reins init                 # Setup wizard: hooks + policy + Watchtower
-reins status               # Hook and Watchtower connection status
+reins init                 # Setup wizard: hooks + policy + Reins Cloud
+reins status               # Hook and Reins Cloud connection status
 reins policy               # View and edit security policy interactively
 reins audit -n 20          # Last 20 audit decisions
 reins stats                # Enforcement counts (allowed / blocked / approved)
-reins scan                 # 13-check security audit
+reins scan                 # OWASP ASI10 security scan
+reins scan --monitor       # Diff against saved baseline, alert on drift
 reins disable / enable     # Temporarily suspend or resume enforcement
 reins upgrade              # Pull latest version from npm
 ```
 
+## Reins Cloud (app.pegasi.ai)
+
+When connected, Reins Cloud provides:
+- Org/team policies pulled on a schedule and merged with local overrides
+- CRITICAL rules set by admins that cannot be locally overridden
+- Centralized audit review across all agents and devices
+
+Connect during `reins init` (Step 7 prompts for your email — no API key paste needed).
+
+Set via env vars:
+
+```bash
+REINS_WATCHTOWER_API_KEY=cr_...
+REINS_WATCHTOWER_BASE_URL=https://app.pegasi.ai  # default
+```
+
+Config lives at `~/.openclaw/reins/config.json`.
+
+## Policy merge order (highest to lowest priority)
+
+1. Reins Cloud org policies — CRITICAL rules are immutable
+2. Reins Cloud team policies
+3. Local overrides at `~/.openclaw/reins/policy.json`
+4. Built-in defaults (balanced: reads ALLOW, writes ASK, deletes DENY)
+
+If Reins Cloud is unreachable, last-cached policies still enforce. Never fails open.
+
+## Audit log
+
+Append-only JSONL at `~/.openclaw/reins/decisions.jsonl`:
+
+```json
+{"timestamp":"2026-04-15T22:39:42Z","module":"Shell","method":"bash","decision":"BLOCKED","reason":"critical: rm -rf /","tool":"Bash","decisionTime":12}
+```
+
+View with `reins audit -n 50` or stream with `tail -f ~/.openclaw/reins/decisions.jsonl`.
+
 ## Setup (if not installed)
 
 ```bash
-npm install -g @pegasi/reins
+npm install -g @pegasi-ai/reins
 reins init
 ```
 
