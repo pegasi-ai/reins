@@ -1043,29 +1043,20 @@ export class ClaudeCodeScanner {
 
     const skillCount = ctx.installedPlugins ? Object.keys(ctx.installedPlugins).length : 0;
 
-    if (!hasPolicyFile && !hasWatchtower) {
+    if (!hasWatchtower) {
+      const detail = hasPolicyFile
+        ? 'local policy only — centralized governance requires Reins Cloud'
+        : 'no policy file and no Reins Cloud connection';
       return this.warn(
         'CLAUDE_GOVERNANCE',
-        `${OWASP_TAGS.AST09} governance gaps: no policy file and no Watchtower connection — monitoring ${skillCount} installed skill(s)`,
-        'Run `reins init` to configure policy enforcement and connect to Reins Cloud for centralized governance.'
-      );
-    }
-
-    if (!hasPolicyFile || !hasWatchtower) {
-      const missing = [
-        ...(!hasPolicyFile ? ['policy file'] : []),
-        ...(!hasWatchtower ? ['Watchtower connection'] : []),
-      ];
-      return this.warn(
-        'CLAUDE_GOVERNANCE',
-        `${OWASP_TAGS.AST09} governance gaps: ${missing.join(', ')} — monitoring ${skillCount} installed skill(s)`,
-        'Run `reins init` to configure policy enforcement and connect to Reins Cloud for centralized governance.'
+        `${OWASP_TAGS.AST09} ${detail} — monitoring ${skillCount} installed skill(s)`,
+        'Run `reins init` and connect to Reins Cloud for centralized policy enforcement, audit, and identity controls.'
       );
     }
 
     return this.pass(
       'CLAUDE_GOVERNANCE',
-      `${OWASP_TAGS.AST09} policy enforcement and audit trail are configured — monitoring ${skillCount} installed skill(s)`
+      `${OWASP_TAGS.AST09} connected to Reins Cloud — centralized governance active, monitoring ${skillCount} installed skill(s)`
     );
   }
 
