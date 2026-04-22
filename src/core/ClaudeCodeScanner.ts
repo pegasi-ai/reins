@@ -27,6 +27,16 @@ export const OWASP_TAGS = {
   MCP01: 'MCP01',  // Tool Poisoning
   MCP05: 'MCP05',  // Broken Authentication
   MCP09: 'MCP09',  // Insufficient Logging
+  AST01: 'AST01',  // Malicious Skills
+  AST02: 'AST02',  // Supply Chain Compromise
+  AST03: 'AST03',  // Over-Privileged Skills
+  AST04: 'AST04',  // Insecure Metadata
+  AST05: 'AST05',  // Unsafe Deserialization
+  AST06: 'AST06',  // Weak Isolation
+  AST07: 'AST07',  // Update Drift
+  AST08: 'AST08',  // Poor Scanning
+  AST09: 'AST09',  // No Governance
+  AST10: 'AST10',  // Cross-Platform Reuse
 } as const;
 
 // ─── Known CVEs ───────────────────────────────────────────────────────────────
@@ -89,6 +99,35 @@ const SECRET_PATTERNS: RegExp[] = [
   /wt_[a-zA-Z0-9]{20,}/,
 ];
 
+// Exfiltration / malicious execution patterns for AST01
+const EXFIL_PATTERNS: RegExp[] = [
+  /\bcurl\b.*https?:\/\//i,
+  /\bwget\b.*https?:\/\//i,
+  /fetch\s*\(\s*["'`]https?:\/\//i,
+  /process\.env\.[A-Z_]{4,}/,
+  /\beval\s*\(/,
+  /require\s*\(\s*['"`]child_process['"`]\s*\)/,
+  /\bexec\s*\(/,
+  /\bspawn\s*\(/,
+  /base64\.b64decode\s*\(/i,
+  /atob\s*\(/,
+];
+
+// Unsafe deserialization patterns for AST05
+const DESERIALIZATION_PATTERNS: RegExp[] = [
+  /!!python\/object/i,
+  /!!python\/name/i,
+  /!!js\/undefined/i,
+  /__proto__\s*:/,
+  /constructor\s*\[\s*['"]prototype['"]\s*\]/,
+  /Object\.setPrototypeOf/,
+  /yaml\.load\s*\([^,)]+\)/,   // yaml.load without safeLoad
+  /JSON\.parse\s*\([^)]*input/i,
+];
+
+// Brand impersonation names for AST04
+const BRAND_NAMES = ['google', 'anthropic', 'openai', 'microsoft', 'amazon', 'apple', 'meta', 'github', 'stripe', 'notion'];
+
 // ─── Claude Code path helpers ─────────────────────────────────────────────────
 
 function claudeHome(): string {
@@ -142,6 +181,8 @@ interface ScanContext {
   memoryFiles: Array<{ path: string; content: string }>;
   configFiles: Array<{ path: string; content: string }>;
   hasYarnPnp: boolean;
+  pluginManifests: Array<{ path: string; manifest: Record<string, unknown>; name: string }>;
+  installedPlugins: Record<string, unknown> | null;
 }
 
 // ─── ClaudeCodeScanner ────────────────────────────────────────────────────────
@@ -151,6 +192,22 @@ export class ClaudeCodeScanner {
 
   async run(): Promise<ScanCheck[]> {
     const ctx = await this.buildContext();
+
+    const [
+      skillMalicious,
+      skillProvenance,
+      isolation,
+      skillUpdateDrift,
+      scanSchedule,
+      governance,
+    ] = await Promise.all([
+      this.checkSkillMalicious(ctx),
+      this.checkSkillProvenance(ctx),
+      this.checkIsolation(ctx),
+      this.checkSkillUpdateDrift(ctx),
+      this.checkScanSchedule(),
+      this.checkGovernance(ctx),
+    ]);
 
     return [
       // ASI01 / MCP01
@@ -181,6 +238,26 @@ export class ClaudeCodeScanner {
       this.checkMcpAuth(ctx),
       // MCP01
       this.checkMcpToolPoisoning(ctx),
+      // AST01
+      skillMalicious,
+      // AST02
+      skillProvenance,
+      // AST03
+      this.checkSkillPermissions(ctx),
+      // AST04
+      this.checkSkillMetadata(ctx),
+      // AST05
+      this.checkSkillDeserialization(ctx),
+      // AST06
+      isolation,
+      // AST07
+      skillUpdateDrift,
+      // AST08
+      scanSchedule,
+      // AST09
+      governance,
+      // AST10
+      this.checkSkillFingerprint(ctx),
     ];
   }
 
@@ -640,10 +717,402 @@ export class ClaudeCodeScanner {
     );
   }
 
+  // ── AST01 — Malicious Skills (exfiltration / code-execution patterns) ────────
+
+  private async checkSkillMalicious(ctx: ScanContext): Promise<ScanCheck> {
+    if (ctx.skillFiles.length === 0) {
+      return this.pass('CLAUDE_SKILL_MALICIOUS', `${OWASP_TAGS.AST01} no skill files found`);
+    }
+
+    for (const file of ctx.skillFiles) {
+      for (const pattern of EXFIL_PATTERNS) {
+        if (pattern.test(file.content)) {
+          return this.fail(
+            'CLAUDE_SKILL_MALICIOUS',
+            `${OWASP_TAGS.AST01} skill '${file.name}' contains potential exfiltration or code-execution pattern: ${pattern}`,
+            'Review the skill file and remove or sandbox any network/exec patterns. Remove the skill if origin is unknown.'
+          );
+        }
+      }
+    }
+
+    return this.pass(
+      'CLAUDE_SKILL_MALICIOUS',
+      `${OWASP_TAGS.AST01} no malicious execution or exfiltration patterns detected in ${ctx.skillFiles.length} skill file(s)`
+    );
+  }
+
+  // ── AST02 — Supply Chain Provenance ──────────────────────────────────────────
+
+  private async checkSkillProvenance(ctx: ScanContext): Promise<ScanCheck> {
+    if (ctx.pluginManifests.length === 0) {
+      return this.pass('CLAUDE_SKILL_PROVENANCE', `${OWASP_TAGS.AST02} no plugin manifests found`);
+    }
+
+    const lacking: string[] = [];
+
+    for (const { manifest, name } of ctx.pluginManifests) {
+      const hasRepository = typeof manifest['repository'] === 'string' && manifest['repository'].length > 0
+        || (typeof manifest['repository'] === 'object' && manifest['repository'] !== null);
+      const hasAuthor = typeof manifest['author'] === 'string' && manifest['author'].length > 0
+        || (typeof manifest['author'] === 'object' && manifest['author'] !== null &&
+            typeof (manifest['author'] as Record<string, unknown>)['name'] === 'string');
+      const hasLicense = typeof manifest['license'] === 'string' && manifest['license'].length > 0;
+
+      const missingCount = [hasRepository, hasAuthor, hasLicense].filter((v) => !v).length;
+      if (missingCount >= 2) {
+        lacking.push(name);
+      }
+    }
+
+    if (lacking.length > 0) {
+      return this.warn(
+        'CLAUDE_SKILL_PROVENANCE',
+        `${OWASP_TAGS.AST02} ${lacking.length} plugin(s) lack provenance metadata (repository, author, or license): ${lacking.join(', ')}`,
+        'Ensure all installed skills have a repository URL, author, and license declared in plugin.json.'
+      );
+    }
+
+    return this.pass(
+      'CLAUDE_SKILL_PROVENANCE',
+      `${OWASP_TAGS.AST02} all ${ctx.pluginManifests.length} plugin(s) have provenance metadata`
+    );
+  }
+
+  // ── AST03 — Over-Privileged Skills ───────────────────────────────────────────
+
+  private checkSkillPermissions(ctx: ScanContext): ScanCheck {
+    const flagged: string[] = [];
+
+    for (const { manifest, name } of ctx.pluginManifests) {
+      const permissions = manifest['permissions'];
+      const keywords = manifest['keywords'];
+
+      let elevated = false;
+
+      if (Array.isArray(permissions)) {
+        if (permissions.includes('*') || permissions.includes('all')) {
+          elevated = true;
+        }
+      }
+
+      if (Array.isArray(keywords)) {
+        if (keywords.some((k: unknown) => typeof k === 'string' && ['sudo', 'admin', 'root'].includes(k.toLowerCase()))) {
+          elevated = true;
+        }
+      }
+
+      if (!elevated) {
+        // Check SKILL.md content for privilege-requiring language
+        const skillFile = ctx.skillFiles.find((f) => f.name === name);
+        if (skillFile) {
+          const privilegePhrases = /run as root|requires sudo|administrator access/i;
+          if (privilegePhrases.test(skillFile.content)) {
+            elevated = true;
+          }
+        }
+      }
+
+      if (elevated) {
+        flagged.push(name);
+      }
+    }
+
+    if (flagged.length > 0) {
+      return this.warn(
+        'CLAUDE_SKILL_PERMISSIONS',
+        `${OWASP_TAGS.AST03} skill '${flagged[0]}' declares elevated permissions or privilege-requiring language`,
+        'Apply least-privilege: restrict skill permissions to only the tools and operations it requires.'
+      );
+    }
+
+    return this.pass(
+      'CLAUDE_SKILL_PERMISSIONS',
+      `${OWASP_TAGS.AST03} no over-privileged skill declarations found`
+    );
+  }
+
+  // ── AST04 — Insecure Metadata / Brand Impersonation ──────────────────────────
+
+  private checkSkillMetadata(ctx: ScanContext): ScanCheck {
+    const impersonating: string[] = [];
+    const incompleteMetadata: string[] = [];
+
+    // Collect all skill names from manifests and skill file directory names
+    const allNames: Array<{ name: string; fromManifest: boolean; manifest?: Record<string, unknown> }> = [
+      ...ctx.pluginManifests.map((m) => ({ name: m.name, fromManifest: true, manifest: m.manifest })),
+      ...ctx.skillFiles
+        .filter((f) => !ctx.pluginManifests.some((m) => m.name === f.name))
+        .map((f) => ({ name: f.name, fromManifest: false })),
+    ];
+
+    for (const entry of allNames) {
+      const lowerName = entry.name.toLowerCase();
+
+      for (const brand of BRAND_NAMES) {
+        if (lowerName.includes(brand) && !KNOWN_SKILL_NAMES.has(entry.name.toLowerCase())) {
+          if (!impersonating.includes(entry.name)) {
+            impersonating.push(entry.name);
+          }
+        }
+      }
+
+      if (entry.fromManifest && entry.manifest) {
+        const hasName = typeof entry.manifest['name'] === 'string' && entry.manifest['name'].length > 0;
+        const hasVersion = typeof entry.manifest['version'] === 'string' && entry.manifest['version'].length > 0;
+        const hasDescription = typeof entry.manifest['description'] === 'string' && entry.manifest['description'].length > 0;
+        if (!hasName || !hasVersion || !hasDescription) {
+          incompleteMetadata.push(entry.name);
+        }
+      }
+    }
+
+    if (impersonating.length > 0) {
+      return this.warn(
+        'CLAUDE_SKILL_METADATA',
+        `${OWASP_TAGS.AST04} skill '${impersonating[0]}' may impersonate brand '${BRAND_NAMES.find((b) => impersonating[0].toLowerCase().includes(b)) ?? ''}' — verify publisher identity`,
+        'Verify the publisher identity at the skill registry before installing. Remove unverified skills.'
+      );
+    }
+
+    if (incompleteMetadata.length > 0) {
+      return this.warn(
+        'CLAUDE_SKILL_METADATA',
+        `${OWASP_TAGS.AST04} ${incompleteMetadata.length} skill(s) have incomplete manifest metadata: ${incompleteMetadata.join(', ')}`,
+        'Verify the publisher identity at the skill registry before installing. Remove unverified skills.'
+      );
+    }
+
+    return this.pass(
+      'CLAUDE_SKILL_METADATA',
+      `${OWASP_TAGS.AST04} no brand impersonation or metadata issues detected`
+    );
+  }
+
+  // ── AST05 — Unsafe Deserialization ───────────────────────────────────────────
+
+  private checkSkillDeserialization(ctx: ScanContext): ScanCheck {
+    if (ctx.skillFiles.length === 0) {
+      return this.pass('CLAUDE_SKILL_DESERIALIZATION', `${OWASP_TAGS.AST05} no skill files found`);
+    }
+
+    for (const file of ctx.skillFiles) {
+      for (const pattern of DESERIALIZATION_PATTERNS) {
+        if (pattern.test(file.content)) {
+          return this.fail(
+            'CLAUDE_SKILL_DESERIALIZATION',
+            `${OWASP_TAGS.AST05} skill '${file.name}' contains unsafe deserialization pattern: ${pattern}`,
+            'Remove or sandbox the skill. Unsafe deserialization can enable remote code execution via crafted YAML/JSON payloads.'
+          );
+        }
+      }
+    }
+
+    return this.pass(
+      'CLAUDE_SKILL_DESERIALIZATION',
+      `${OWASP_TAGS.AST05} no unsafe deserialization patterns detected in ${ctx.skillFiles.length} skill file(s)`
+    );
+  }
+
+  // ── AST06 — Weak Isolation ────────────────────────────────────────────────────
+
+  private async checkIsolation(ctx: ScanContext): Promise<ScanCheck> {
+    const dangerouslySkipPermissions = ctx.globalSettings?.['dangerouslySkipPermissions'] === true
+      || ctx.projectSettings?.['dangerouslySkipPermissions'] === true;
+
+    if (dangerouslySkipPermissions) {
+      return this.fail(
+        'CLAUDE_ISOLATION',
+        `${OWASP_TAGS.AST06} dangerouslySkipPermissions is enabled — Claude Code runs without permission guardrails`,
+        'Remove dangerouslySkipPermissions from settings.json. Run Claude Code in a container for process isolation.'
+      );
+    }
+
+    const hasSandbox = ctx.globalSettings?.['sandbox'] === true
+      || ctx.projectSettings?.['sandbox'] === true;
+
+    const hasDocker = await fs.pathExists('/var/run/docker.sock');
+
+    if (hasSandbox || hasDocker) {
+      return this.pass(
+        'CLAUDE_ISOLATION',
+        `${OWASP_TAGS.AST06} sandbox or container isolation appears to be configured`
+      );
+    }
+
+    return this.warn(
+      'CLAUDE_ISOLATION',
+      `${OWASP_TAGS.AST06} no explicit sandbox configuration detected — consider running Claude Code in a container`,
+      'Remove dangerouslySkipPermissions from settings.json. Run Claude Code in a container for process isolation.'
+    );
+  }
+
+  // ── AST07 — Update Drift ──────────────────────────────────────────────────────
+
+  private async checkSkillUpdateDrift(ctx: ScanContext): Promise<ScanCheck> {
+    if (!ctx.installedPlugins || Object.keys(ctx.installedPlugins).length === 0) {
+      return this.pass('CLAUDE_SKILL_UPDATE_DRIFT', `${OWASP_TAGS.AST07} no installed plugins to check for update drift`);
+    }
+
+    const installedPluginsPath = path.join(claudeHome(), 'plugins', 'installed_plugins.json');
+    let installedMtime: Date;
+    try {
+      const stat = await fs.stat(installedPluginsPath);
+      installedMtime = stat.mtime;
+    } catch {
+      return this.pass('CLAUDE_SKILL_UPDATE_DRIFT', `${OWASP_TAGS.AST07} all installed skill files match their installation state`);
+    }
+
+    const tampered: string[] = [];
+
+    for (const pluginName of Object.keys(ctx.installedPlugins)) {
+      const pluginCacheDir = path.join(claudeHome(), 'plugins', 'cache', pluginName);
+      if (!(await fs.pathExists(pluginCacheDir))) continue;
+
+      const skillFilesInCache: Array<{ path: string; content: string; name?: string }> = [];
+      await this.collectFiles(pluginCacheDir, /.+/i, skillFilesInCache, 4);
+
+      for (const f of skillFilesInCache) {
+        try {
+          const stat = await fs.stat(f.path);
+          if (stat.mtime > installedMtime) {
+            if (!tampered.includes(pluginName)) {
+              tampered.push(pluginName);
+            }
+            break;
+          }
+        } catch { /* skip */ }
+      }
+    }
+
+    if (tampered.length > 0) {
+      return this.warn(
+        'CLAUDE_SKILL_UPDATE_DRIFT',
+        `${OWASP_TAGS.AST07} ${tampered.length} skill(s) have files modified after installation — possible tampering or auto-update: ${tampered.join(', ')}`,
+        'Re-verify skill integrity by reinstalling from a pinned SHA or checking the plugin registry.'
+      );
+    }
+
+    return this.pass(
+      'CLAUDE_SKILL_UPDATE_DRIFT',
+      `${OWASP_TAGS.AST07} all installed skill files match their installation state`
+    );
+  }
+
+  // ── AST08 — Poor Scanning / No Automated Scanning ────────────────────────────
+
+  private async checkScanSchedule(): Promise<ScanCheck> {
+    const schedulerJson = path.join(this.home, '.openclaw', 'reins', 'scheduler.json');
+    const launchAgentPlist = path.join(this.home, 'Library', 'LaunchAgents', 'ai.pegasi.reins.watchtower.plist');
+
+    const [hasScheduler, hasLaunchAgent] = await Promise.all([
+      fs.pathExists(schedulerJson),
+      fs.pathExists(launchAgentPlist),
+    ]);
+
+    if (hasScheduler || hasLaunchAgent) {
+      return this.pass(
+        'CLAUDE_SCAN_SCHEDULE',
+        `${OWASP_TAGS.AST08} automated scan schedule is configured`
+      );
+    }
+
+    return this.warn(
+      'CLAUDE_SCAN_SCHEDULE',
+      `${OWASP_TAGS.AST08} no scheduled security scan detected — drift and supply chain attacks may go undetected`,
+      'Run `reins scan --monitor` on a schedule. Use `reins init` to set up automated daily scanning.'
+    );
+  }
+
+  // ── AST09 — No Governance ─────────────────────────────────────────────────────
+
+  private async checkGovernance(ctx: ScanContext): Promise<ScanCheck> {
+    const policyPath = path.join(this.home, '.openclaw', 'reins', 'policy.json');
+    const watchtowerConfigPath = path.join(this.home, '.openclaw', 'reins', 'config.json');
+
+    const [hasPolicyFile, watchtowerConfig] = await Promise.all([
+      fs.pathExists(policyPath),
+      this.loadJson<Record<string, unknown>>(watchtowerConfigPath),
+    ]);
+
+    const hasWatchtower = !!(
+      watchtowerConfig?.['watchtower'] &&
+      typeof (watchtowerConfig['watchtower'] as Record<string, unknown>)['apiKey'] === 'string' &&
+      ((watchtowerConfig['watchtower'] as Record<string, unknown>)['apiKey'] as string).length > 0
+    );
+
+    const skillCount = ctx.installedPlugins ? Object.keys(ctx.installedPlugins).length : 0;
+
+    if (!hasPolicyFile && !hasWatchtower) {
+      return this.warn(
+        'CLAUDE_GOVERNANCE',
+        `${OWASP_TAGS.AST09} governance gaps: no policy file and no Watchtower connection — monitoring ${skillCount} installed skill(s)`,
+        'Run `reins init` to configure policy enforcement and connect to Reins Cloud for centralized governance.'
+      );
+    }
+
+    if (!hasPolicyFile || !hasWatchtower) {
+      const missing = [
+        ...(!hasPolicyFile ? ['policy file'] : []),
+        ...(!hasWatchtower ? ['Watchtower connection'] : []),
+      ];
+      return this.warn(
+        'CLAUDE_GOVERNANCE',
+        `${OWASP_TAGS.AST09} governance gaps: ${missing.join(', ')} — monitoring ${skillCount} installed skill(s)`,
+        'Run `reins init` to configure policy enforcement and connect to Reins Cloud for centralized governance.'
+      );
+    }
+
+    return this.pass(
+      'CLAUDE_GOVERNANCE',
+      `${OWASP_TAGS.AST09} policy enforcement and audit trail are configured — monitoring ${skillCount} installed skill(s)`
+    );
+  }
+
+  // ── AST10 — Cross-Platform Reuse / Duplicate Skills ──────────────────────────
+
+  private checkSkillFingerprint(ctx: ScanContext): ScanCheck {
+    if (ctx.skillFiles.length === 0) {
+      return this.pass('CLAUDE_SKILL_FINGERPRINT', `${OWASP_TAGS.AST10} no skill files found`);
+    }
+
+    const hashToNames = new Map<string, string[]>();
+
+    for (const file of ctx.skillFiles) {
+      const chunk = file.content.slice(0, 4096);
+      const hash = crypto.createHash('sha256').update(chunk).digest('hex');
+      const existing = hashToNames.get(hash) ?? [];
+      existing.push(file.path);
+      hashToNames.set(hash, existing);
+    }
+
+    const duplicates: string[] = [];
+    for (const [, paths] of hashToNames) {
+      if (paths.length > 1) {
+        duplicates.push(...paths);
+      }
+    }
+
+    const uniqueDuplicates = [...new Set(duplicates)];
+
+    if (uniqueDuplicates.length > 0) {
+      return this.warn(
+        'CLAUDE_SKILL_FINGERPRINT',
+        `${OWASP_TAGS.AST10} ${uniqueDuplicates.length} skill content duplicate(s) detected across installation paths — possible cross-platform clone: ${uniqueDuplicates.map((p) => path.basename(path.dirname(p))).join(', ')}`,
+        'Deduplicate skill installations. Identical skill content across paths may indicate supply chain mirroring or repackaging.'
+      );
+    }
+
+    return this.pass(
+      'CLAUDE_SKILL_FINGERPRINT',
+      `${OWASP_TAGS.AST10} no duplicate skill content detected across ${ctx.skillFiles.length} skill file(s)`
+    );
+  }
+
   // ─── Context builder ──────────────────────────────────────────────────────────
 
   private async buildContext(): Promise<ScanContext> {
-    const [globalSettings, projectSettings, mcpConfig, skillFiles, memoryFiles, configFiles, hasYarnPnp] =
+    const [globalSettings, projectSettings, mcpConfig, skillFiles, memoryFiles, configFiles, hasYarnPnp, pluginManifests] =
       await Promise.all([
         this.loadJson<SettingsJson>(globalSettingsPath()),
         this.loadJson<SettingsJson>(projectSettingsPath()),
@@ -652,9 +1121,41 @@ export class ClaudeCodeScanner {
         this.discoverMemoryFiles(),
         this.discoverConfigFiles(),
         this.detectYarnPnp(),
+        this.discoverPluginManifests(),
       ]);
 
-    return { globalSettings, projectSettings, mcpConfig, skillFiles, memoryFiles, configFiles, hasYarnPnp };
+    let installedPlugins: Record<string, unknown> | null = null;
+    const installedPluginsPath = path.join(claudeHome(), 'plugins', 'installed_plugins.json');
+    try {
+      if (await fs.pathExists(installedPluginsPath)) {
+        const raw = await fs.readJson(installedPluginsPath) as { plugins?: Record<string, unknown> };
+        installedPlugins = raw.plugins ?? {};
+      }
+    } catch { /* leave null */ }
+
+    return { globalSettings, projectSettings, mcpConfig, skillFiles, memoryFiles, configFiles, hasYarnPnp, pluginManifests, installedPlugins };
+  }
+
+  private async discoverPluginManifests(): Promise<Array<{ path: string; manifest: Record<string, unknown>; name: string }>> {
+    const results: Array<{ path: string; manifest: Record<string, unknown>; name: string }> = [];
+    const searchDirs = [
+      path.join(claudeHome(), 'plugins', 'cache'),
+      path.join(claudeHome(), 'skills'),
+      path.join(process.cwd(), '.claude', 'skills'),
+    ];
+    for (const dir of searchDirs) {
+      if (!(await fs.pathExists(dir))) continue;
+      const raw: Array<{ path: string; content: string; name?: string }> = [];
+      await this.collectFiles(dir, /plugin\.json$/i, raw, 4);
+      for (const f of raw) {
+        try {
+          const manifest = JSON.parse(f.content) as Record<string, unknown>;
+          const name = typeof manifest['name'] === 'string' ? manifest['name'] : path.basename(path.dirname(f.path));
+          results.push({ path: f.path, manifest, name });
+        } catch { /* skip */ }
+      }
+    }
+    return results;
   }
 
   private async discoverSkillFiles(): Promise<Array<{ path: string; content: string; name: string }>> {
