@@ -72,11 +72,11 @@ async function runClaudeScanner(homeDir, cwd, extraEnv = {}) {
   }
 }
 
-test('ClaudeCodeScanner returns 24 checks on a minimal empty install', async () => {
+test('ClaudeCodeScanner returns 27 checks on a minimal empty install', async () => {
   const homeDir = makeTempRoot('reins-cc-min-');
   const cwd = makeTempRoot('reins-cc-cwd-');
   const checks = await runClaudeScanner(homeDir, cwd);
-  assert.equal(checks.length, 24);
+  assert.equal(checks.length, 27);
 });
 
 test('CLAUDE_EXCESSIVE_PERMISSIONS fails on bare Bash allow rule in global settings', async () => {

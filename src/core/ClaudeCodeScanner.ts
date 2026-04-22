@@ -173,6 +173,25 @@ interface McpConfig {
   [key: string]: unknown;
 }
 
+interface DetectedAgent {
+  name: string;
+  evidence: string;  // config dir or binary path that triggered detection
+}
+
+// Known agent frameworks and how to detect them
+const AGENT_PROBES: Array<{ name: string; configDirs?: string[]; binaries?: string[] }> = [
+  { name: 'Claude Code',    configDirs: ['.claude'],                         binaries: ['claude'] },
+  { name: 'OpenClaw',       configDirs: ['.openclaw'],                       binaries: ['openclaw'] },
+  { name: 'Hermes',         configDirs: ['.hermes', '.config/hermes'],       binaries: ['hermes'] },
+  { name: 'Claude Cowork',  configDirs: ['.cowork', '.claude-cowork'],       binaries: ['cowork', 'claude-cowork'] },
+  { name: 'Cursor',         configDirs: ['.cursor', 'Library/Application Support/Cursor'], binaries: ['cursor'] },
+  { name: 'Continue',       configDirs: ['.continue'],                       binaries: ['continue'] },
+  { name: 'Cline',          configDirs: ['.cline'],                          binaries: ['cline'] },
+  { name: 'Aider',          configDirs: ['.aider'],                          binaries: ['aider'] },
+  { name: 'Goose',          configDirs: ['.config/goose'],                   binaries: ['goose'] },
+  { name: 'Amp',            configDirs: ['.amp'],                            binaries: ['amp'] },
+];
+
 interface ScanContext {
   globalSettings: SettingsJson | null;
   projectSettings: SettingsJson | null;
@@ -183,6 +202,7 @@ interface ScanContext {
   hasYarnPnp: boolean;
   pluginManifests: Array<{ path: string; manifest: Record<string, unknown>; name: string }>;
   installedPlugins: Record<string, unknown> | null;
+  detectedAgents: DetectedAgent[];
 }
 
 // ─── ClaudeCodeScanner ────────────────────────────────────────────────────────
@@ -258,6 +278,10 @@ export class ClaudeCodeScanner {
       governance,
       // AST10
       this.checkSkillFingerprint(ctx),
+      // ENV inventory (always-pass telemetry)
+      this.checkEnvMcp(ctx),
+      this.checkEnvSkills(ctx),
+      this.checkEnvAgents(ctx),
     ];
   }
 
@@ -1100,10 +1124,54 @@ export class ClaudeCodeScanner {
     );
   }
 
+  // ── ENV — MCP Connection Inventory ───────────────────────────────────────────
+
+  private checkEnvMcp(ctx: ScanContext): ScanCheck {
+    const servers = Object.keys(ctx.mcpConfig?.mcpServers ?? {});
+    if (servers.length === 0) {
+      return this.pass('CLAUDE_ENV_MCP', `ENV 0 MCP servers configured`);
+    }
+    return this.pass(
+      'CLAUDE_ENV_MCP',
+      `ENV ${servers.length} MCP server(s) configured: ${servers.join(', ')}`
+    );
+  }
+
+  // ── ENV — Skills / Plugins Inventory ─────────────────────────────────────────
+
+  private checkEnvSkills(ctx: ScanContext): ScanCheck {
+    const installedCount = ctx.installedPlugins ? Object.keys(ctx.installedPlugins).length : 0;
+    const pluginNames = ctx.installedPlugins ? Object.keys(ctx.installedPlugins) : [];
+    const skillFileCount = ctx.skillFiles.length;
+
+    if (installedCount === 0 && skillFileCount === 0) {
+      return this.pass('CLAUDE_ENV_SKILLS', `ENV 0 skills or plugins installed`);
+    }
+
+    const parts: string[] = [];
+    if (installedCount > 0) parts.push(`${installedCount} plugin(s): ${pluginNames.join(', ')}`);
+    if (skillFileCount > 0 && skillFileCount !== installedCount) parts.push(`${skillFileCount} skill file(s)`);
+
+    return this.pass('CLAUDE_ENV_SKILLS', `ENV ${parts.join('; ')}`);
+  }
+
+  // ── ENV — Agent Framework Inventory ──────────────────────────────────────────
+
+  private checkEnvAgents(ctx: ScanContext): ScanCheck {
+    if (ctx.detectedAgents.length === 0) {
+      return this.pass('CLAUDE_ENV_AGENTS', `ENV no agent frameworks detected`);
+    }
+    const names = ctx.detectedAgents.map((a) => a.name).join(', ');
+    return this.pass(
+      'CLAUDE_ENV_AGENTS',
+      `ENV ${ctx.detectedAgents.length} agent framework(s) detected: ${names}`
+    );
+  }
+
   // ─── Context builder ──────────────────────────────────────────────────────────
 
   private async buildContext(): Promise<ScanContext> {
-    const [globalSettings, projectSettings, mcpConfig, skillFiles, memoryFiles, configFiles, hasYarnPnp, pluginManifests] =
+    const [globalSettings, projectSettings, mcpConfig, skillFiles, memoryFiles, configFiles, hasYarnPnp, pluginManifests, detectedAgents] =
       await Promise.all([
         this.loadJson<SettingsJson>(globalSettingsPath()),
         this.loadJson<SettingsJson>(projectSettingsPath()),
@@ -1113,6 +1181,7 @@ export class ClaudeCodeScanner {
         this.discoverConfigFiles(),
         this.detectYarnPnp(),
         this.discoverPluginManifests(),
+        this.detectAgents(),
       ]);
 
     let installedPlugins: Record<string, unknown> | null = null;
@@ -1124,7 +1193,37 @@ export class ClaudeCodeScanner {
       }
     } catch { /* leave null */ }
 
-    return { globalSettings, projectSettings, mcpConfig, skillFiles, memoryFiles, configFiles, hasYarnPnp, pluginManifests, installedPlugins };
+    return { globalSettings, projectSettings, mcpConfig, skillFiles, memoryFiles, configFiles, hasYarnPnp, pluginManifests, installedPlugins, detectedAgents };
+  }
+
+  private async detectAgents(): Promise<DetectedAgent[]> {
+    const found: DetectedAgent[] = [];
+
+    for (const probe of AGENT_PROBES) {
+      // Check config directories under $HOME
+      for (const dir of probe.configDirs ?? []) {
+        const fullPath = path.join(this.home, dir);
+        if (await fs.pathExists(fullPath)) {
+          found.push({ name: probe.name, evidence: fullPath });
+          break;
+        }
+      }
+      if (found.some((a) => a.name === probe.name)) continue;
+
+      // Check binaries on PATH
+      const pathDirs = (process.env.PATH ?? '').split(':');
+      for (const bin of probe.binaries ?? []) {
+        for (const dir of pathDirs) {
+          if (await fs.pathExists(path.join(dir, bin))) {
+            found.push({ name: probe.name, evidence: path.join(dir, bin) });
+            break;
+          }
+        }
+        if (found.some((a) => a.name === probe.name)) break;
+      }
+    }
+
+    return found;
   }
 
   private async discoverPluginManifests(): Promise<Array<{ path: string; manifest: Record<string, unknown>; name: string }>> {
