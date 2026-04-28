@@ -20,8 +20,8 @@ export const DEFAULT_POLICY: SecurityPolicy = {
         description: 'Modification of files requires approval',
       },
       delete: {
-        action: 'DENY',
-        description: 'Deletion is strictly prohibited',
+        action: 'ASK',
+        description: 'File deletion requires approval',
       },
     },
     Shell: {
@@ -75,6 +75,27 @@ export const DEFAULT_POLICY: SecurityPolicy = {
         action: 'ASK',
         description: 'HTTP request may leak data',
       },
+    },
+    // Internal session/agent operations — reading state is safe, never needs approval.
+    Session: {
+      history: { action: 'ALLOW', description: 'Reading session history is safe' },
+      list:    { action: 'ALLOW', description: 'Listing sessions is safe' },
+      status:  { action: 'ALLOW', description: 'Reading session status is safe' },
+      yield:   { action: 'ALLOW', description: 'Internal async yield — no user action needed' },
+      create:  { action: 'ASK',   description: 'Creating a new session' },
+      destroy: { action: 'ASK',   description: 'Destroying a session requires approval' },
+    },
+    Memory: {
+      read:   { action: 'ALLOW', description: 'Reading memory is safe' },
+      list:   { action: 'ALLOW', description: 'Listing memory entries is safe' },
+      update: { action: 'ASK',   description: 'Writing to memory requires approval' },
+      delete: { action: 'ASK',   description: 'Deleting memory entries requires approval' },
+    },
+    Agent: {
+      status: { action: 'ALLOW', description: 'Reading agent status is safe' },
+      list:   { action: 'ALLOW', description: 'Listing agents is safe' },
+      spawn:  { action: 'ASK',   description: 'Spawning a sub-agent requires approval' },
+      stop:   { action: 'ASK',   description: 'Stopping an agent requires approval' },
     },
   },
 };
