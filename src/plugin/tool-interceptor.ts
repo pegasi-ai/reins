@@ -73,11 +73,54 @@ const TOOL_TO_MODULE: Record<string, { module: string; method: string }> = {
   list_nodes: { module: 'Gateway', method: 'listNodes' },
   send_message: { module: 'Gateway', method: 'sendMessage' },
   session_status: { module: 'Gateway', method: 'listSessions' },
+  // Session internals
+  sessions_history: { module: 'Session', method: 'history' },
+  sessions_list: { module: 'Session', method: 'list' },
+  sessions_yield: { module: 'Session', method: 'yield' },
+  sessions_create: { module: 'Session', method: 'create' },
+  sessions_destroy: { module: 'Session', method: 'destroy' },
+  sessions_status: { module: 'Session', method: 'status' },
+  // Memory internals
+  memory_read: { module: 'Memory', method: 'read' },
+  memory_list: { module: 'Memory', method: 'list' },
+  memory_update: { module: 'Memory', method: 'update' },
+  memory_delete: { module: 'Memory', method: 'delete' },
+  update_plan: { module: 'Memory', method: 'update' },
+  // Agent internals
+  agent_status: { module: 'Agent', method: 'status' },
+  agent_list: { module: 'Agent', method: 'list' },
+  agent_spawn: { module: 'Agent', method: 'spawn' },
+  agent_stop: { module: 'Agent', method: 'stop' },
   // Gmail-style names used in demos/integrations
   'gmail.deletemessages': { module: 'Gmail', method: 'deleteMessages' },
   'gmail.emptytrash': { module: 'Gmail', method: 'emptyTrash' },
   'gmail.deletelabel': { module: 'Gmail', method: 'deleteLabel' },
 };
+
+/**
+ * Derive a module name from an unmapped tool name.
+ * Splits on _ or camelCase, capitalises the first segment.
+ * e.g. "sessions_history" → "Session", "memoryRead" → "Memory"
+ */
+function deriveModule(toolName: string): string {
+  const first = toolName.split(/[_\-.]|(?=[A-Z])/)[0];
+  const base = first.replace(/s$/, ''); // plurals: "sessions" → "session"
+  return base.charAt(0).toUpperCase() + base.slice(1);
+}
+
+/**
+ * Derive a method name from an unmapped tool name.
+ * Takes everything after the first segment and camelCases it.
+ * e.g. "sessions_history" → "history", "memory_update_all" → "updateAll"
+ */
+function deriveMethod(toolName: string): string {
+  const parts = toolName.split(/[_\-.]|(?=[A-Z])/);
+  if (parts.length <= 1) return toolName;
+  return parts
+    .slice(1)
+    .map((p, i) => (i === 0 ? p : p.charAt(0).toUpperCase() + p.slice(1)))
+    .join('');
+}
 
 const FORCE_ASK_IRREVERSIBILITY_THRESHOLD = 55;
 const EXPLICIT_CONFIRM_IRREVERSIBILITY_THRESHOLD = ((): number => {
@@ -115,8 +158,8 @@ export function createToolCallHook(
 
     try {
     const mapping = TOOL_TO_MODULE[toolName.toLowerCase()];
-    const moduleName = mapping?.module ?? 'Unknown';
-    const methodName = mapping?.method ?? toolName;
+    const moduleName = mapping?.module ?? deriveModule(toolName);
+    const methodName = mapping?.method ?? deriveMethod(toolName);
 
     let params = event.params;
     let shouldReturnParams = false;
