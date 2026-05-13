@@ -11,6 +11,11 @@ import { MemoryRiskForecaster, MemoryRiskAssessment } from '../core/MemoryRiskFo
 import { trustRateLimiter } from '../core/TrustRateLimiter';
 import { InterventionMetadata } from '../types';
 import { BrowserSessionStore } from '../storage/BrowserSessionStore';
+import { loadCloudPolicyCache } from './cloud-policy';
+import {
+  evaluateCloudMcpRule,
+  evaluateCloudShellRule,
+} from './cloud-policy-evaluator';
 import {
   classifyDestructiveAction,
   DestructiveClassification,
@@ -120,6 +125,106 @@ export function createToolCallHook(
 
     let params = event.params;
     let shouldReturnParams = false;
+    const cloudPolicy = loadCloudPolicyCache();
+
+    if (
+      cloudPolicy &&
+      moduleName === 'Shell' &&
+      ['bash', 'exec'].includes(methodName)
+    ) {
+      const command = typeof params.command === 'string' ? params.command : '';
+      const matchedRule = evaluateCloudShellRule(command, cloudPolicy);
+
+      if (matchedRule?.action === 'BLOCK') {
+        const reason =
+          `Reins Cloud policy blocked shell command. ` +
+          `${matchedRule.description || 'No description provided.'} ` +
+          `[rule: ${matchedRule.rule}; severity: ${matchedRule.severity || 'unknown'}]`;
+        await DecisionLog.append({
+          timestamp: new Date().toISOString(),
+          module: moduleName,
+          method: methodName,
+          args: [params],
+          decision: 'BLOCKED',
+          decisionTime: 0,
+          reason,
+          eventType: 'tool_blocked',
+          tool: toolName,
+        });
+        return { block: true, blockReason: reason };
+      }
+
+      if (matchedRule?.action === 'WARN') {
+        logger.warn('Reins Cloud shell rule matched with WARN action', {
+          toolName,
+          command,
+          rule: matchedRule.rule,
+          severity: matchedRule.severity,
+        });
+      }
+
+      await DecisionLog.append({
+        timestamp: new Date().toISOString(),
+        module: moduleName,
+        method: methodName,
+        args: [params],
+        decision: 'ALLOWED',
+        decisionTime: 0,
+        reason: matchedRule
+          ? 'allowed by Reins Cloud shell policy cache'
+          : 'allowed by Reins Cloud shell policy cache (no matching block rule)',
+        eventType: 'tool_executed',
+        tool: toolName,
+      });
+      return shouldReturnParams ? { params } : {};
+    }
+
+    // Checks if rule matches one of the MCP tool names (if not, matchedRule will be null and execution continues)
+    if (cloudPolicy) {
+      const matchedRule = evaluateCloudMcpRule(toolName, cloudPolicy);
+
+      if (matchedRule?.action === 'BLOCK') {
+        const reason =
+          `Reins Cloud policy blocked MCP tool. ` +
+          `${matchedRule.description || 'No description provided.'} ` +
+          `[rule: ${matchedRule.rule}; severity: ${matchedRule.severity || 'unknown'}]`;
+        await DecisionLog.append({
+          timestamp: new Date().toISOString(),
+          module: moduleName,
+          method: methodName,
+          args: [params],
+          decision: 'BLOCKED',
+          decisionTime: 0,
+          reason,
+          eventType: 'tool_blocked',
+          tool: toolName,
+        });
+        return { block: true, blockReason: reason };
+      }
+
+      if (matchedRule?.action === 'WARN') {
+        logger.warn('Reins Cloud MCP rule matched with WARN action', {
+          toolName,
+          rule: matchedRule.rule,
+          severity: matchedRule.severity,
+        });
+      }
+
+      if (matchedRule) {
+        await DecisionLog.append({
+          timestamp: new Date().toISOString(),
+          module: moduleName,
+          method: methodName,
+          args: [params],
+          decision: 'ALLOWED',
+          decisionTime: 0,
+          reason: 'allowed by Reins Cloud MCP policy cache',
+          eventType: 'tool_executed',
+          tool: toolName,
+        });
+        return shouldReturnParams ? { params } : {};
+      }
+    }
 
     // Persistent browser-session management.
     if (moduleName === 'Browser') {

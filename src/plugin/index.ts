@@ -19,6 +19,7 @@ import { Interceptor } from '../core/Interceptor';
 import { PolicyStore } from '../storage/PolicyStore';
 import { logger } from '../core/Logger';
 import { createToolCallHook } from './tool-interceptor';
+import { getCloudAuthoritativeRuntimePolicy } from './cloud-policy';
 import { channelContextStore } from './ChannelContextStore';
 import { initNotifier, sendApprovalNotification, type FallbackChannel } from './oob-notifier';
 import { createApproveCommand, createDenyCommand } from './approval-commands';
@@ -179,13 +180,20 @@ export default {
     logger.info('Reins plugin loading...');
 
     try {
-      const policy = PolicyStore.loadSync();
+      const runtimePolicy =
+        getCloudAuthoritativeRuntimePolicy() ||
+        {
+          policy: PolicyStore.loadSync(),
+          source: 'local' as const,
+          cloudPolicy: null,
+        };
       logger.info('Security policy loaded', {
-        defaultAction: policy.defaultAction,
-        moduleCount: Object.keys(policy.modules).length,
+        source: runtimePolicy.source,
+        defaultAction: runtimePolicy.policy.defaultAction,
+        moduleCount: Object.keys(runtimePolicy.policy.modules).length,
       });
 
-      const interceptor = new Interceptor(policy);
+      const interceptor = new Interceptor(runtimePolicy.policy);
 
       // -------------------------------------------------------------------
       // OOB notifier: initialise with runtime send functions + gateway config
