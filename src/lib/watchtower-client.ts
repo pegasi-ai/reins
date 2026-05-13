@@ -32,7 +32,6 @@ export interface McpRule {
 
 export interface PolicyBundle {
   shell_rules: ShellRule[];
-  protected_paths: string[];
   mcp_rules: McpRule[];
   updated_at: string;
 }
@@ -246,21 +245,20 @@ export async function fetchPolicies(
   const p = raw && typeof raw === 'object' ? (raw as Record<string, unknown>) : {};
   return {
     shell_rules: Array.isArray(p['shell_rules']) ? (p['shell_rules'] as ShellRule[]) : [],
-    protected_paths: Array.isArray(p['protected_paths']) ? (p['protected_paths'] as string[]) : [],
     mcp_rules: Array.isArray(p['mcp_rules']) ? (p['mcp_rules'] as McpRule[]) : [],
     updated_at: typeof p['updated_at'] === 'string' ? p['updated_at'] : new Date().toISOString(),
   };
 }
 
 /**
- * GET /api/settings/shell_policies — fetch shell policy rules.
- * Handles both array response and { rules: [] } response shapes.
+ * GET /api/policies/shell_sync — fetch shell policy rules for local runtime sync.
+ * Handles { items: [] } plus older array / { rules: [] } response shapes.
  */
 export async function fetchShellPolicies(
   apiKey: string,
   baseUrl: string
 ): Promise<ShellRule[]> {
-  const url = buildWatchtowerUrl(baseUrl, '/api/settings/shell_policies');
+  const url = buildWatchtowerUrl(baseUrl, '/api/policies/shell_sync');
   const { status, body } = await nodeRequest('GET', url, bearerHeaders(apiKey), null, 15_000);
 
   if (status < 200 || status >= 300) {
@@ -275,6 +273,9 @@ export async function fetchShellPolicies(
 
   if (raw && typeof raw === 'object') {
     const r = raw as Record<string, unknown>;
+    if (Array.isArray(r['items'])) {
+      return r['items'] as ShellRule[];
+    }
     if (Array.isArray(r['rules'])) {
       return r['rules'] as ShellRule[];
     }

@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
 import os from 'node:os';
 import path from 'node:path';
-import { mkdtempSync, mkdirSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 
 const openclawHome = mkdtempSync(path.join(os.tmpdir(), 'reins-policy-tests-'));
 mkdirSync(openclawHome, { recursive: true });
@@ -14,6 +14,7 @@ process.env.REINS_DESTRUCTIVE_GATING = 'off';
 const require = createRequire(import.meta.url);
 const { Interceptor } = require('../dist/core/Interceptor.js');
 const { createToolCallHook } = require('../dist/plugin/tool-interceptor.js');
+const { resolveRuntimePolicy } = require('../dist/plugin/cloud-policy.js');
 
 // Temp dirs used as stand-ins for real paths — no real directories assumed
 const allowedDir = mkdtempSync(path.join(os.tmpdir(), 'reins-allowed-'));
@@ -23,6 +24,16 @@ const allowedFile = path.join(allowedDir, 'output.txt');
 const outsideFile = path.join(outsideDir, 'other.txt');
 const secretsFile = path.join(secretsDir, 'keys.json');
 const nestedFile = path.join(allowedDir, 'subdir', 'readme.md');
+
+function writeCloudPolicies(payload) {
+  const reinsDir = path.join(openclawHome, 'reins');
+  mkdirSync(reinsDir, { recursive: true });
+  writeFileSync(path.join(reinsDir, 'policies.json'), JSON.stringify(payload, null, 2));
+}
+
+function clearCloudPolicies() {
+  rmSync(path.join(openclawHome, 'reins', 'policies.json'), { force: true });
+}
 
 // ---------------------------------------------------------------------------
 // defaultAction
@@ -56,6 +67,60 @@ test('defaultAction ALLOW passes unmapped tools', async () => {
   );
 
   assert.notEqual(result.block, true);
+});
+
+test('cloud policy becomes the authoritative runtime policy when policies.json exists', () => {
+  writeCloudPolicies({
+    shell_rules: [],
+    mcp_rules: [],
+    updated_at: new Date().toISOString(),
+  });
+
+  const localPolicy = {
+    defaultAction: 'DENY',
+    modules: {
+      Shell: {
+        exec: { action: 'DENY', description: 'local deny should be ignored' },
+      },
+    },
+  };
+
+  const runtime = resolveRuntimePolicy(localPolicy);
+  assert.equal(runtime.source, 'cloud');
+  assert.equal(runtime.policy.defaultAction, 'ALLOW');
+  assert.deepEqual(runtime.policy.modules, {});
+
+  clearCloudPolicies();
+});
+
+test('cloud shell cache overrides local shell policy in OpenClaw runtime', async () => {
+  writeCloudPolicies({
+    shell_rules: [],
+    mcp_rules: [],
+    updated_at: new Date().toISOString(),
+  });
+
+  const interceptor = new Interceptor(
+    {
+      defaultAction: 'DENY',
+      modules: {
+        Shell: {
+          exec: { action: 'DENY', description: 'local deny should be ignored' },
+        },
+      },
+    },
+    false
+  );
+  const hook = createToolCallHook(interceptor);
+
+  const result = await hook(
+    { toolName: 'exec', params: { command: 'echo avocado' } },
+    { toolName: 'exec', sessionKey: 'policy:cloud-shell-authoritative' }
+  );
+
+  assert.notEqual(result.block, true);
+
+  clearCloudPolicies();
 });
 
 // ---------------------------------------------------------------------------
