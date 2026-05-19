@@ -34,7 +34,7 @@ function expandTilde(raw: string): string {
 }
 
 function matchesGlob(pattern: string, str: string): boolean {
-  const norm = str.replace(/\\/g, '/');
+  const norm = expandTilde(str).replace(/\\/g, '/');
   const pat = expandTilde(pattern).replace(/\\/g, '/');
 
   const regex = pat
