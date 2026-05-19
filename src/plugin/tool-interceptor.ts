@@ -11,14 +11,6 @@ import { MemoryRiskForecaster, MemoryRiskAssessment } from '../core/MemoryRiskFo
 import { trustRateLimiter } from '../core/TrustRateLimiter';
 import { InterventionMetadata } from '../types';
 import { BrowserSessionStore } from '../storage/BrowserSessionStore';
-import {
-  classifyDestructiveAction,
-  DestructiveClassification,
-  getBulkThreshold,
-  hashArgs,
-  isDestructiveGatingEnabled,
-} from '../core/DestructiveClassifier';
-import { DecisionLog } from '../storage/DecisionLog';
 import crypto from 'crypto';
 
 /**
@@ -86,8 +78,6 @@ const EXPLICIT_CONFIRM_IRREVERSIBILITY_THRESHOLD = ((): number => {
   return Number.isFinite(parsed) && parsed > 0 ? parsed : 80;
 })();
 const EXPLICIT_CONFIRM_MEMORY_THRESHOLD = 85;
-const DESTRUCTIVE_GATING_ENABLED = isDestructiveGatingEnabled();
-const DESTRUCTIVE_BULK_THRESHOLD = getBulkThreshold();
 const memoryForecaster = new MemoryRiskForecaster();
 
 export interface BeforeToolCallEvent {
@@ -147,29 +137,6 @@ export function createToolCallHook(
     }
 
     const irreversibility = scoreIrreversibility(moduleName, methodName, params);
-    const destructiveClassification: DestructiveClassification | undefined = DESTRUCTIVE_GATING_ENABLED
-      ? classifyDestructiveAction(toolName, params, {
-          moduleName,
-          methodName,
-          bulkThreshold: DESTRUCTIVE_BULK_THRESHOLD,
-        })
-      : undefined;
-
-    if (destructiveClassification?.isDestructive) {
-      logInterceptEvent({
-        eventType: 'destructive_detected',
-        moduleName,
-        methodName,
-        toolName,
-        params,
-        severity: destructiveClassification.severity,
-        reasons: destructiveClassification.reasons,
-        bulkCount: destructiveClassification.bulkCount,
-        target: destructiveClassification.target,
-        argsHash: hashArgs(params),
-      });
-    }
-
     const sessionKeyForMemory = ctx.sessionKey || `local:${ctx.agentId || 'default'}`;
     const memoryRisk = memoryForecaster.assess(
       sessionKeyForMemory,
@@ -185,41 +152,11 @@ export function createToolCallHook(
       params,
       irreversibility,
       memoryRisk,
-      destructiveClassification?.isDestructive ? destructiveClassification : undefined,
       sessionKeyForMemory
     );
 
-    if (destructiveClassification?.isDestructive && intervention?.actionSummary) {
-      logInterceptEvent({
-        eventType: 'approval_requested',
-        moduleName,
-        methodName,
-        toolName,
-        params,
-        severity: destructiveClassification.severity,
-        reasons: destructiveClassification.reasons,
-        bulkCount: destructiveClassification.bulkCount,
-        target: destructiveClassification.target,
-        summary: intervention.actionSummary,
-        requireToken: intervention.confirmationToken,
-      });
-    }
-
     try {
       await interceptor.evaluate(moduleName, methodName, [params], ctx.sessionKey, intervention);
-      if (destructiveClassification?.isDestructive) {
-        logInterceptEvent({
-          eventType: 'tool_executed',
-          moduleName,
-          methodName,
-          toolName,
-          params,
-          severity: destructiveClassification.severity,
-          reasons: destructiveClassification.reasons,
-          bulkCount: destructiveClassification.bulkCount,
-          target: destructiveClassification.target,
-        });
-      }
       return shouldReturnParams ? { params } : {};
     } catch (err: unknown) {
       const reason =
@@ -227,20 +164,6 @@ export function createToolCallHook(
           ? err.message
           : `${moduleName}.${methodName}() blocked by Reins policy`;
       logger.warn(`Blocking ${toolName}: ${reason}`);
-      if (destructiveClassification?.isDestructive) {
-        logInterceptEvent({
-          eventType: 'tool_blocked',
-          moduleName,
-          methodName,
-          toolName,
-          params,
-          severity: destructiveClassification.severity,
-          reasons: destructiveClassification.reasons,
-          bulkCount: destructiveClassification.bulkCount,
-          target: destructiveClassification.target,
-          summary: reason,
-        });
-      }
       return { block: true, blockReason: reason };
     }
     } catch (unexpectedErr: unknown) {
@@ -263,34 +186,9 @@ function buildInterventionMetadata(
   params: Record<string, unknown>,
   irreversibility: IrreversibilityAssessment,
   memoryRisk: MemoryRiskAssessment,
-  destructive: DestructiveClassification | undefined,
   sessionKey: string
 ): InterventionMetadata | undefined {
   const intervention: InterventionMetadata = {};
-
-  if (destructive?.isDestructive) {
-    intervention.forceAsk = true;
-    intervention.requiresRespondToolApproval = true;
-    intervention.destructiveSeverity = destructive.severity;
-    intervention.destructiveReasons = destructive.reasons;
-    intervention.destructiveBulkCount = destructive.bulkCount;
-    intervention.destructiveTarget = destructive.target;
-
-    if (destructive.severity === 'CATASTROPHIC') {
-      intervention.requiresExplicitConfirmation = true;
-      intervention.confirmationToken =
-        intervention.confirmationToken || generateConfirmationToken(moduleName, methodName);
-    }
-
-    intervention.actionSummary = buildDestructiveSummary(
-      moduleName,
-      methodName,
-      destructive
-    );
-    intervention.interventionReason =
-      'Pre-execution destructive action intercept triggered; explicit human authorization required.';
-    intervention.overrideDescription = intervention.actionSummary;
-  }
 
   const challenge = detectBrowserChallenge(toolName, params);
   if (challenge.level === 'likely') {
@@ -388,85 +286,6 @@ function generateConfirmationToken(moduleName: string, methodName: string): stri
   const digest = crypto.createHash('sha1').update(seed).digest('hex').slice(0, 6).toUpperCase();
   return `CONFIRM-${digest}`;
 }
-
-function buildDestructiveSummary(
-  moduleName: string,
-  methodName: string,
-  classification: DestructiveClassification
-): string {
-  const lines = [
-    `⚠ REINS INTERCEPT (${classification.severity})`,
-    `Tool: ${moduleName}.${methodName}`,
-  ];
-
-  if (classification.target) {
-    lines.push(`Target: ${classification.target}`);
-  }
-  if (classification.bulkCount !== undefined) {
-    lines.push(`Bulk: ${classification.bulkCount.toLocaleString()} items`);
-  }
-
-  lines.push(`Reasons: ${classification.reasons.join(', ') || 'destructive_signal'}`);
-  // Token intentionally omitted — delivered out-of-band only, never in agent context.
-  lines.push(`Require: out-of-band human approval`);
-  return lines.join('\n');
-}
-
-interface InterceptEventInput {
-  eventType:
-    | 'destructive_detected'
-    | 'approval_requested'
-    | 'approval_decision'
-    | 'tool_executed'
-    | 'tool_blocked';
-  moduleName: string;
-  methodName: string;
-  toolName: string;
-  params: Record<string, unknown>;
-  severity?: 'HIGH' | 'CATASTROPHIC';
-  reasons?: string[];
-  bulkCount?: number;
-  target?: string;
-  argsHash?: string;
-  summary?: string;
-  requireToken?: string;
-  approved?: boolean;
-  decisionInput?: 'yes' | 'allow' | 'no' | 'confirm';
-  confirmation?: string;
-}
-
-function logInterceptEvent(input: InterceptEventInput): void {
-  const defaultDecisionByEvent: Record<InterceptEventInput['eventType'], 'ALLOWED' | 'APPROVED' | 'REJECTED' | 'BLOCKED'> = {
-    destructive_detected: 'BLOCKED',
-    approval_requested: 'BLOCKED',
-    approval_decision: input.approved ? 'APPROVED' : 'REJECTED',
-    tool_executed: 'ALLOWED',
-    tool_blocked: 'BLOCKED',
-  };
-
-  void DecisionLog.append({
-    timestamp: new Date().toISOString(),
-    module: input.moduleName,
-    method: input.methodName,
-    args: [input.params],
-    decision: defaultDecisionByEvent[input.eventType],
-    decisionTime: 0,
-    reason: input.eventType,
-    eventType: input.eventType,
-    tool: input.toolName,
-    severity: input.severity,
-    reasons: input.reasons,
-    bulkCount: input.bulkCount,
-    target: input.target,
-    argsHash: input.argsHash,
-    summary: input.summary,
-    requireToken: input.requireToken,
-    approved: input.approved,
-    decisionInput: input.decisionInput,
-    confirmation: input.confirmation,
-  });
-}
-
 
 export function getToolMapping(): Record<string, { module: string; method: string }> {
   return { ...TOOL_TO_MODULE };

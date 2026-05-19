@@ -17,7 +17,6 @@ export interface DecisionRecord {
   decisionTime: number; // milliseconds
   reason?: string;
   eventType?:
-    | 'destructive_detected'
     | 'approval_requested'
     | 'approval_decision'
     | 'tool_executed'

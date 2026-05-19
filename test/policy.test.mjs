@@ -8,8 +8,6 @@ import { mkdtempSync, mkdirSync } from 'node:fs';
 const openclawHome = mkdtempSync(path.join(os.tmpdir(), 'reins-policy-tests-'));
 mkdirSync(openclawHome, { recursive: true });
 process.env.OPENCLAW_HOME = openclawHome;
-// Disable destructive gating so classifier doesn't override policy decisions
-process.env.REINS_DESTRUCTIVE_GATING = 'off';
 
 const require = createRequire(import.meta.url);
 const { Interceptor } = require('../dist/core/Interceptor.js');

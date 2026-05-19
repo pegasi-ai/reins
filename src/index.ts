@@ -44,13 +44,6 @@ export { DEFAULT_POLICY } from './config';
 // Detection + Risk Scoring
 export { detectBrowserChallenge } from './core/BrowserChallengeDetector';
 export type { BrowserChallengeSignal } from './core/BrowserChallengeDetector';
-export {
-  classifyDestructiveAction,
-  getBulkThreshold,
-  isDestructiveGatingEnabled,
-  hashArgs,
-} from './core/DestructiveClassifier';
-export type { DestructiveClassification, DestructiveSeverity } from './core/DestructiveClassifier';
 export { scoreIrreversibility } from './core/IrreversibilityScorer';
 export type { IrreversibilityAssessment } from './core/IrreversibilityScorer';
 export { MemoryRiskForecaster } from './core/MemoryRiskForecaster';
