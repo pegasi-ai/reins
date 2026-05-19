@@ -15,6 +15,7 @@ import { ExecutionContext } from '../types';
 import { logger } from './Logger';
 import { approvalQueue } from './ApprovalQueue';
 import { DecisionLog } from '../storage/DecisionLog';
+import { buildAuditEnvelope } from '../lib/audit-schema';
 
 export class Arbitrator {
   async judge(context: ExecutionContext): Promise<boolean> {
@@ -227,8 +228,23 @@ export class Arbitrator {
     confirmation?: string
   ): Promise<void> {
     try {
+      const timestamp = new Date().toISOString();
+      const envelope = buildAuditEnvelope({
+        timestamp,
+        agentType: context.auditContext?.agentType || 'unknown',
+        sessionId: context.auditContext?.sessionId,
+        toolName: `${context.moduleName}.${context.methodName}`,
+        moduleName: context.moduleName,
+        methodName: context.methodName,
+        payload: context.args,
+        decision: approved ? 'APPROVED' : 'REJECTED',
+        policyId: context.auditContext?.policyId ?? `${context.moduleName}.${context.methodName}`,
+        reason: 'approval_decision',
+        interventionType: 'approval_decision',
+        metadataSources: [context.args, context.auditContext],
+      });
       await DecisionLog.append({
-        timestamp: new Date().toISOString(),
+        timestamp,
         module: context.moduleName,
         method: context.methodName,
         args: context.args,
@@ -239,6 +255,17 @@ export class Arbitrator {
         approved,
         decisionInput: decision,
         confirmation,
+        schema_version: envelope.schema_version,
+        agent_type: envelope.agent_type,
+        session_id: envelope.session_id,
+        run_id: envelope.run_id,
+        run_started_at: envelope.run_started_at,
+        run_ended_at: envelope.run_ended_at,
+        principal: context.auditContext?.principal ?? envelope.principal,
+        model: context.auditContext?.model ?? envelope.model,
+        tokens: context.auditContext?.tokens ?? envelope.tokens,
+        touched_resources: envelope.touched_resources,
+        policy_decisions: envelope.policy_decisions,
       });
     } catch {
       // best-effort only

@@ -9,6 +9,9 @@
   },
   "scripts": {
     "build": "tsc",
+    "dev": "bash scripts/dev-local.sh",
+    "demo:seed": "bash scripts/seed-demo.sh",
+    "dev:url": "bash scripts/dev-local.sh --base-url",
     "test": "npm run build && node --test test/**/*.test.mjs",
     "lint": "eslint src --ext .ts",
     "format": "prettier --write \"src/**/*.ts\"",

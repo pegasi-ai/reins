@@ -16,6 +16,8 @@ import { logPolicyDecision, PolicyDecision } from '../lib/watchtower-client';
 import { appendPending } from '../lib/pending-queue';
 import { getCurrentRunId } from '../lib/run-manager';
 import { resolveWatchtowerCredentials } from '../storage/WatchtowerConfig';
+import { buildAuditEnvelope } from '../lib/audit-schema';
+import { getClaudeToolMetadata, resolveHookAgentType } from '../lib/claude-tool-metadata';
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -23,6 +25,8 @@ interface ClaudeCodePostHookInput {
   tool_name: string;
   tool_input: Record<string, unknown>;
   tool_response?: unknown;
+  model?: string;
+  usage?: unknown;
   session_id?: string;
 }
 
@@ -39,6 +43,16 @@ interface AuditEntry {
   cwd: string;
   session_id: string | null;
   run_id: string | null;
+  decisionTime: number;
+  schema_version: string;
+  agent_type: string;
+  run_started_at: string | null;
+  run_ended_at: string | null;
+  principal: unknown;
+  model: string | null;
+  tokens: unknown;
+  touched_resources: unknown[];
+  policy_decisions: unknown[];
 }
 
 // ─── Paths ───────────────────────────────────────────────────────────────────
@@ -81,54 +95,54 @@ async function main(): Promise<void> {
   const toolInput: Record<string, unknown> =
     input.tool_input && typeof input.tool_input === 'object' ? input.tool_input : {};
 
-  // Determine module and method from tool name
-  let moduleName: string;
-  let methodName: string;
-  let actionSummary: string;
-
-  if (toolName.startsWith('mcp__')) {
-    moduleName = 'MCP';
-    methodName = toolName;
-    actionSummary = toolName;
-  } else if (toolName === 'Bash') {
-    moduleName = 'Shell';
-    methodName = 'bash';
-    const cmd = typeof toolInput['command'] === 'string' ? toolInput['command'] : '';
-    actionSummary = cmd.slice(0, 120);
-  } else if (['Edit', 'MultiEdit', 'Write'].includes(toolName)) {
-    moduleName = 'FileSystem';
-    methodName = toolName.toLowerCase();
-    const fp =
-      typeof toolInput['file_path'] === 'string'
-        ? toolInput['file_path']
-        : typeof toolInput['path'] === 'string'
-        ? toolInput['path']
-        : '';
-    actionSummary = fp;
-  } else {
-    moduleName = 'Other';
-    methodName = toolName.toLowerCase();
-    actionSummary = toolName;
-  }
+  const metadata = getClaudeToolMetadata(toolName, toolInput);
+  const moduleName = metadata.moduleName;
+  const methodName = metadata.methodName;
+  const actionSummary = metadata.actionSummary;
 
   const decisionTimeMs = Date.now() - startTime;
+  const timestamp = new Date().toISOString();
   const runId = getCurrentRunId();
+  const policyId = `${moduleName}.${methodName}`;
+  const envelope = buildAuditEnvelope({
+    timestamp,
+    agentType: resolveHookAgentType(),
+    sessionId: input.session_id ?? null,
+    toolName,
+    moduleName,
+    methodName,
+    payload: toolInput,
+    decision: 'ALLOWED',
+    policyId,
+    reason: actionSummary,
+    metadataSources: [input, toolInput, input.tool_response],
+  });
 
   // 3. Build audit entry
   const auditEntry: AuditEntry = {
-    timestamp: new Date().toISOString(),
+    timestamp,
     decision: 'ALLOWED',
     tool: toolName,
     action: actionSummary,
     module: moduleName,
     method: methodName,
     decision_time_ms: decisionTimeMs,
+    decisionTime: decisionTimeMs,
     // Identity & context
     user: os.userInfo().username,
     hostname: os.hostname(),
     cwd: process.cwd(),
     session_id: input.session_id ?? null,
     run_id: runId,
+    schema_version: envelope.schema_version,
+    agent_type: envelope.agent_type,
+    run_started_at: envelope.run_started_at,
+    run_ended_at: envelope.run_ended_at,
+    principal: envelope.principal,
+    model: envelope.model,
+    tokens: envelope.tokens,
+    touched_resources: envelope.touched_resources,
+    policy_decisions: envelope.policy_decisions,
   };
 
   // 4. Append to decisions.jsonl (sync)

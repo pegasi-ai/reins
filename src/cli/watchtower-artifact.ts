@@ -4,6 +4,7 @@ import fs from 'fs-extra';
 import os from 'os';
 import path from 'path';
 import { ScanCheck, ScanReport } from '../core/SecurityScanner';
+import { InventorySnapshot } from '../core/ClaudeCodeScanner';
 import { getDataPath, getPreferredDataPath } from '../core/data-dir';
 
 export type JsonValue = null | boolean | number | string | JsonValue[] | { [key: string]: JsonValue };
@@ -95,12 +96,14 @@ export interface WatchtowerScanArtifact {
       config_baseline_path: null;
     };
   };
+  inventory: InventorySnapshot;
 }
 
 interface WriteWatchtowerArtifactOptions {
   command: string;
   report: ScanReport;
   monitorComparison: DriftComparison | null;
+  inventory?: InventorySnapshot;
 }
 
 const WATCHTOWER_ARTIFACT_VERSION = '1.0.0' as const;
@@ -187,7 +190,8 @@ function getWatchtowerArtifactPath(): string {
 export function buildWatchtowerArtifact(
   command: string,
   report: ScanReport,
-  monitorComparison: DriftComparison | null
+  monitorComparison: DriftComparison | null,
+  inventory?: InventorySnapshot
 ): WatchtowerScanArtifact {
   const repository = getRepositoryIdentity();
   const monitorEnabled = monitorComparison !== null;
@@ -259,6 +263,7 @@ export function buildWatchtowerArtifact(
         config_baseline_path: null,
       },
     },
+    inventory: inventory ?? { mcp_servers: [], installed_agents: [], tools_count: 0 },
   };
 }
 
@@ -267,7 +272,7 @@ export async function writeWatchtowerArtifact(options: WriteWatchtowerArtifactOp
   artifactPath: string;
 }> {
   const artifactPath = getWatchtowerArtifactPath();
-  const artifact = buildWatchtowerArtifact(options.command, options.report, options.monitorComparison);
+  const artifact = buildWatchtowerArtifact(options.command, options.report, options.monitorComparison, options.inventory);
 
   await fs.ensureDir(path.dirname(artifactPath));
   await fs.writeJson(artifactPath, artifact, { spaces: 2 });

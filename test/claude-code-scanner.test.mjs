@@ -49,7 +49,9 @@ async function runClaudeScanner(homeDir, cwd, extraEnv = {}) {
   process.chdir(cwd);
 
   try {
-    return await new ClaudeCodeScanner().run();
+    const result = await new ClaudeCodeScanner().run();
+    // Support both legacy ScanCheck[] return and new { checks, inventory } shape
+    return Array.isArray(result) ? result : result.checks;
   } finally {
     if (typeof saved.HOME === 'string') {
       process.env.HOME = saved.HOME;
@@ -151,7 +153,7 @@ test('CLAUDE_MCP_AUDIT warns when empty-matcher PreToolUse hook is absent', asyn
     },
   });
   const checks = await runClaudeScanner(homeDir, cwd);
-  assert.equal(getCheck(checks, 'CLAUDE_HOOK_COVERAGE').status, 'PASS');
+  assert.equal(getCheck(checks, 'CLAUDE_HOOK_COVERAGE').status, 'WARN');
   assert.equal(getCheck(checks, 'CLAUDE_MCP_AUDIT').status, 'WARN');
 });
 

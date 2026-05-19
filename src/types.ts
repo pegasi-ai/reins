@@ -88,8 +88,27 @@ export interface ExecutionContext {
   /** OpenClaw session key (e.g. "agent:main:whatsapp:dm:+1555…"). Present in daemon/channel mode. */
   sessionKey?: string;
   intervention?: InterventionMetadata;
+  auditContext?: AuditContext;
   /** Called once when a tool is blocked to fire the OOB approval notification.
    *  Returns true if a notification was actually dispatched (channel context found),
    *  false if no channel is available (e.g. TUI sessions). */
   onBlockCallback?: (sessionKey: string, moduleName: string, methodName: string) => Promise<boolean>;
 }
+
+export interface AuditContext {
+  agentType?: AuditAgentType;
+  sessionId?: string;
+  policyId?: string | null;
+  principal?: AuditPrincipal | null;
+  model?: string | null;
+  tokens?: AuditTokenUsage | null;
+  touchedResources?: TouchedResource[];
+  policyDecisions?: AuditPolicyDecision[];
+}
+import type {
+  AuditAgentType,
+  AuditPolicyDecision,
+  AuditPrincipal,
+  AuditTokenUsage,
+  TouchedResource,
+} from './lib/audit-schema';

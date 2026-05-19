@@ -76,12 +76,13 @@ export async function scanCommand(options: ScanCommandOptions): Promise<void> {
     }
 
     const scanner = new SecurityScanner();
-    const [baseReport, claudeChecks] = await Promise.all([
+    const [baseReport, claudeScanResult] = await Promise.all([
       scanner.run(),
       new ClaudeCodeScanner().run(),
     ]);
 
-    const mergedChecks: ScanCheck[] = [...baseReport.checks, ...claudeChecks];
+    const mergedChecks: ScanCheck[] = [...baseReport.checks, ...claudeScanResult.checks];
+    const claudeInventory = claudeScanResult.inventory;
     let report: ScanReport = {
       checks: mergedChecks,
       score: mergedChecks.filter((c) => c.status === 'PASS').length,
@@ -101,6 +102,7 @@ export async function scanCommand(options: ScanCommandOptions): Promise<void> {
         command,
         report,
         monitorComparison,
+        inventory: claudeInventory,
       });
       await maybeUploadWatchtowerArtifact(artifact, true);
       console.log(JSON.stringify(report, null, 2));
@@ -141,6 +143,7 @@ export async function scanCommand(options: ScanCommandOptions): Promise<void> {
       command,
       report,
       monitorComparison,
+      inventory: claudeInventory,
     });
     renderWatchtowerArtifactSummary(artifactPath);
     await maybeUploadWatchtowerArtifact(artifact, false);
@@ -159,7 +162,24 @@ export async function scanCommand(options: ScanCommandOptions): Promise<void> {
 
 export async function runSetupScan(): Promise<SetupScanResult> {
   const scanner = new SecurityScanner();
-  const report = await scanner.run();
+  const [baseReport, claudeScanResult] = await Promise.all([
+    scanner.run(),
+    new ClaudeCodeScanner().run(),
+  ]);
+
+  const mergedChecks: ScanCheck[] = [...baseReport.checks, ...claudeScanResult.checks];
+  const report: ScanReport = {
+    checks: mergedChecks,
+    score: mergedChecks.filter((c) => c.status === 'PASS').length,
+    total: mergedChecks.length,
+    verdict: mergedChecks.some((c) => c.status === 'FAIL')
+      ? 'EXPOSED'
+      : mergedChecks.some((c) => c.status === 'WARN')
+        ? 'NEEDS ATTENTION'
+        : 'SECURE',
+    timestamp: baseReport.timestamp,
+  };
+  const claudeInventory = claudeScanResult.inventory;
   const command = 'reins init';
 
   renderTerminalReport(report);
@@ -171,6 +191,7 @@ export async function runSetupScan(): Promise<SetupScanResult> {
     command,
     report,
     monitorComparison: null,
+    inventory: claudeInventory,
   });
   renderWatchtowerArtifactSummary(artifactPath);
   const uploadResult = await maybeUploadWatchtowerArtifact(artifact, false);
@@ -849,7 +870,7 @@ export async function enrollWatchtowerWithEmail(
 }
 
 async function maybeConnectWatchtowerInteractively(
-  artifact: WatchtowerScanArtifact
+  _artifact: WatchtowerScanArtifact
 ): Promise<Awaited<ReturnType<typeof resolveWatchtowerCredentials>>> {
   if (!process.stdin.isTTY || !process.stdout.isTTY) {
     return null;
@@ -871,20 +892,15 @@ async function maybeConnectWatchtowerInteractively(
     return null;
   }
 
-  const { email } = await inquirer.prompt([
-    {
-      type: 'input',
-      name: 'email',
-      message: 'Email',
-      validate: (value: string) =>
-        /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.trim()) ? true : 'Enter a valid email address.',
-    },
-  ]);
-
   try {
-    const outcome = await enrollWatchtowerWithEmail(email.trim(), artifact);
-    console.log(`  ${chalk.dim(`Dashboard: ${outcome.dashboardUrl}`)}`);
-    console.log(`  ${chalk.green('✅ Connected!')} ${chalk.dim(`Session saved to ${outcome.configPath}`)}`);
+    const watchtowerSettings = await loadWatchtowerSettings();
+    const baseUrl =
+      watchtowerSettings?.baseUrl?.trim()
+      || process.env.REINS_WATCHTOWER_BASE_URL?.trim()
+      || process.env.CLAWREINS_WATCHTOWER_BASE_URL?.trim()
+      || DEFAULT_WATCHTOWER_BASE_URL;
+    const login = await runCliLoginFlow({ baseUrl });
+    console.log(`  ${chalk.green('✅ Connected!')} ${chalk.dim(`Dashboard: ${login.dashboardUrl}`)}`);
     console.log(`  ${chalk.green('Next scan will upload automatically.')}`);
     return await resolveWatchtowerCredentials();
   } catch (error) {

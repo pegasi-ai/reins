@@ -542,22 +542,25 @@ export async function initWizard(options: InitWizardOptions = {}): Promise<InitS
       }
     }
 
-    // Install Claude Code hooks
+    // Install Claude Code / Cowork hooks
     if (!jsonMode) {
-      console.log(chalk.bold('Step 7b: Installing Claude Code hooks...'));
+      console.log(chalk.bold('Step 7b: Installing Claude-family hooks...'));
     }
     try {
       const hookResult = await installClaudeCodeHooks();
       if (!jsonMode) {
         if (hookResult.alreadyInstalled) {
-          console.log(chalk.green('✅ Claude Code hooks already installed'));
+          console.log(chalk.green('✅ Claude-family hooks already installed'));
         } else {
-          console.log(chalk.green(`✅ Claude Code hooks installed at ${hookResult.path}`));
+          console.log(chalk.green(`✅ Claude-family hooks installed at ${hookResult.path}`));
+          if (hookResult.installedPaths.length > 1) {
+            console.log(chalk.dim(`   Targets: ${hookResult.installedPaths.join(', ')}`));
+          }
         }
       }
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      warnings.push(`Claude Code hook installation failed: ${msg}`);
+      warnings.push(`Claude-family hook installation failed: ${msg}`);
       if (!jsonMode) {
         console.log(chalk.yellow(`⚠️  Hook installation failed: ${msg}`));
       }

@@ -146,6 +146,21 @@ function mcpConfigPath(): string {
   return path.join(process.cwd(), '.mcp.json');
 }
 
+/** ~/.claude.json — Claude Code CLI global config; stores mcpServers added via `claude mcp add` */
+function claudeCliConfigPath(): string {
+  return path.join(os.homedir(), '.claude.json');
+}
+
+/** ~/Library/Application Support/Claude/claude_desktop_config.json — Claude Desktop MCP servers */
+function claudeDesktopConfigPath(): string {
+  return path.join(os.homedir(), 'Library', 'Application Support', 'Claude', 'claude_desktop_config.json');
+}
+
+/** ~/.claude/mcp-needs-auth-cache.json — cloud-registered remote MCP servers (oauth, needs auth) */
+function mcpNeedsAuthCachePath(): string {
+  return path.join(os.homedir(), '.claude', 'mcp-needs-auth-cache.json');
+}
+
 // ─── Internal types ───────────────────────────────────────────────────────────
 
 interface SettingsJson {
@@ -161,8 +176,10 @@ interface SettingsJson {
 }
 
 interface McpServer {
+  type?: string;
   command?: string;
   args?: string[];
+  url?: string;
   env?: Record<string, string>;
   auth?: unknown;
   [key: string]: unknown;
@@ -190,6 +207,7 @@ const AGENT_PROBES: Array<{ name: string; configDirs?: string[]; binaries?: stri
   { name: 'Aider',          configDirs: ['.aider'],                          binaries: ['aider'] },
   { name: 'Goose',          configDirs: ['.config/goose'],                   binaries: ['goose'] },
   { name: 'Amp',            configDirs: ['.amp'],                            binaries: ['amp'] },
+  { name: 'Codex',          configDirs: ['.codex'],                          binaries: ['codex'] },
 ];
 
 interface ScanContext {
@@ -205,12 +223,39 @@ interface ScanContext {
   detectedAgents: DetectedAgent[];
 }
 
+// ─── Inventory snapshot (structured data passed to WatchtowerScanArtifact) ────
+
+export interface McpServerEntry {
+  name: string;
+  type: 'stdio' | 'http' | 'cloud';
+  command: string | null;
+  args: string[];
+  url: string | null;
+}
+
+export interface InstalledAgentEntry {
+  name: string;
+  installed: true;
+  path: string;
+}
+
+export interface InventorySnapshot {
+  mcp_servers: McpServerEntry[];
+  installed_agents: InstalledAgentEntry[];
+  tools_count: number;
+}
+
 // ─── ClaudeCodeScanner ────────────────────────────────────────────────────────
+
+export interface ClaudeCodeScanResult {
+  checks: ScanCheck[];
+  inventory: InventorySnapshot;
+}
 
 export class ClaudeCodeScanner {
   private readonly home = os.homedir();
 
-  async run(): Promise<ScanCheck[]> {
+  async run(): Promise<ClaudeCodeScanResult> {
     const ctx = await this.buildContext();
 
     const [
@@ -229,7 +274,7 @@ export class ClaudeCodeScanner {
       this.checkGovernance(ctx),
     ]);
 
-    return [
+    const checks: ScanCheck[] = [
       // ASI01 / MCP01
       this.checkSkillInjection(ctx),
       // ASI02 (permissions)
@@ -283,6 +328,30 @@ export class ClaudeCodeScanner {
       this.checkEnvSkills(ctx),
       this.checkEnvAgents(ctx),
     ];
+
+    return { checks, inventory: this.buildInventory(ctx) };
+  }
+
+  private buildInventory(ctx: ScanContext): InventorySnapshot {
+    const mcpServers: McpServerEntry[] = Object.entries(ctx.mcpConfig?.mcpServers ?? {}).map(
+      ([name, server]) => ({
+        name,
+        type: server.type === 'http' ? 'http' : server.type === 'cloud' ? 'cloud' : 'stdio',
+        command: server.command ?? null,
+        args: Array.isArray(server.args) ? server.args : [],
+        url: (server.url as string | undefined) ?? null,
+      })
+    );
+
+    const installed_agents: InstalledAgentEntry[] = ctx.detectedAgents.map((a) => ({
+      name: a.name,
+      installed: true,
+      path: a.evidence,
+    }));
+
+    const tools_count = mcpServers.length; // MCP server count as proxy; expanded by server when tool lists are available
+
+    return { mcp_servers: mcpServers, installed_agents, tools_count };
   }
 
   // ── ASI01 / MCP01 — Skill & Tool Injection ──────────────────────────────────
@@ -341,7 +410,22 @@ export class ClaudeCodeScanner {
   // ── ASI02 — Hook Coverage (non-MCP tools) ───────────────────────────────────
 
   private checkHookCoverage(ctx: ScanContext): ScanCheck {
-    const required = ['Bash', 'Edit', 'MultiEdit', 'Write'];
+    const required = [
+      'Bash',
+      'Edit',
+      'Glob',
+      'Grep',
+      'LS',
+      'MultiEdit',
+      'NotebookEdit',
+      'NotebookRead',
+      'Read',
+      'Task',
+      'TodoWrite',
+      'WebFetch',
+      'WebSearch',
+      'Write',
+    ];
     const covered = this.coveredPreToolMatchers(ctx);
     const missing = required.filter((m) => !covered.has(m));
 
@@ -382,7 +466,29 @@ export class ClaudeCodeScanner {
     const covered = new Set<string>();
     for (const settings of [ctx.globalSettings, ctx.projectSettings]) {
       for (const group of settings?.hooks?.PreToolUse ?? []) {
-        if (group.hooks?.length > 0) covered.add(group.matcher);
+        if (group.hooks?.length > 0) {
+          covered.add(group.matcher);
+          if (group.matcher === '' || group.matcher === '*') {
+            for (const matcher of [
+              'Bash',
+              'Edit',
+              'Glob',
+              'Grep',
+              'LS',
+              'MultiEdit',
+              'NotebookEdit',
+              'NotebookRead',
+              'Read',
+              'Task',
+              'TodoWrite',
+              'WebFetch',
+              'WebSearch',
+              'Write',
+            ]) {
+              covered.add(matcher);
+            }
+          }
+        }
       }
     }
     return covered;
@@ -1171,11 +1277,14 @@ export class ClaudeCodeScanner {
   // ─── Context builder ──────────────────────────────────────────────────────────
 
   private async buildContext(): Promise<ScanContext> {
-    const [globalSettings, projectSettings, mcpConfig, skillFiles, memoryFiles, configFiles, hasYarnPnp, pluginManifests, detectedAgents] =
+    const [globalSettings, projectSettings, projectMcpConfig, cliConfig, desktopConfig, mcpNeedsAuth, skillFiles, memoryFiles, configFiles, hasYarnPnp, pluginManifests, detectedAgents] =
       await Promise.all([
         this.loadJson<SettingsJson>(globalSettingsPath()),
         this.loadJson<SettingsJson>(projectSettingsPath()),
         this.loadJson<McpConfig>(mcpConfigPath()),
+        this.loadJson<Record<string, unknown>>(claudeCliConfigPath()),
+        this.loadJson<McpConfig>(claudeDesktopConfigPath()),
+        this.loadJson<Record<string, unknown>>(mcpNeedsAuthCachePath()),
         this.discoverSkillFiles(),
         this.discoverMemoryFiles(),
         this.discoverConfigFiles(),
@@ -1183,6 +1292,42 @@ export class ClaudeCodeScanner {
         this.discoverPluginManifests(),
         this.detectAgents(),
       ]);
+
+    // ── Collect MCP servers from all known sources ────────────────────────────
+    const mergedMcpServers: Record<string, McpServer> = {};
+
+    // 1. ~/.claude.json global mcpServers (stdio, added via `claude mcp add --global`)
+    const cliGlobal = (cliConfig?.mcpServers ?? {}) as Record<string, McpServer>;
+    Object.assign(mergedMcpServers, cliGlobal);
+
+    // 2. ~/.claude.json projects[home].mcpServers and projects[cwd].mcpServers (http/stdio, project-scoped)
+    const cliProjects = (cliConfig?.projects ?? {}) as Record<string, { mcpServers?: Record<string, McpServer> }>;
+    for (const scopePath of [os.homedir(), process.cwd()]) {
+      const projMcp = cliProjects[scopePath]?.mcpServers ?? {};
+      Object.assign(mergedMcpServers, projMcp);
+    }
+
+    // 3. ~/Library/Application Support/Claude/claude_desktop_config.json (Claude Desktop)
+    const desktopServers = (desktopConfig?.mcpServers ?? {}) as Record<string, McpServer>;
+    Object.assign(mergedMcpServers, desktopServers);
+
+    // 4. ~/.claude/settings.json mcpServers (global settings)
+    const settingsMcp = (globalSettings?.mcpServers ?? {}) as Record<string, McpServer>;
+    Object.assign(mergedMcpServers, settingsMcp);
+
+    // 5. Project-level .mcp.json (highest priority — project-specific overrides)
+    Object.assign(mergedMcpServers, projectMcpConfig?.mcpServers ?? {});
+
+    // 6. mcp-needs-auth-cache.json — cloud-registered remote MCP servers (names only)
+    //    Add any names not already captured (these are oauth/remote servers managed by claude.ai)
+    for (const name of Object.keys(mcpNeedsAuth ?? {})) {
+      if (!(name in mergedMcpServers)) {
+        mergedMcpServers[name] = { type: 'cloud' };
+      }
+    }
+
+    const mcpConfig: McpConfig | null =
+      Object.keys(mergedMcpServers).length > 0 ? { mcpServers: mergedMcpServers } : null;
 
     let installedPlugins: Record<string, unknown> | null = null;
     const installedPluginsPath = path.join(claudeHome(), 'plugins', 'installed_plugins.json');

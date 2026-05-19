@@ -47,6 +47,7 @@ npm install -g @pegasi/reins && reins init
 - BLOCKED always: `rm -rf /`, `mkfs`, `dd` to disk device, fork bombs
 - BLOCKED (user-overridable): `DROP TABLE/DATABASE`, `TRUNCATE`, `DELETE` without WHERE,
   `git push --force`, `kill -9`, pipe-to-shell (`| bash`, `| sh`)
+- BLOCKED cloud deletions: `aws s3 rm --recursive`, `aws ec2 terminate-instances`, `aws rds delete-db-instance`, `aws iam delete-user/role`, `aws cloudformation delete-stack`, `aws eks delete-cluster`, `aws dynamodb delete-table`; `gcloud compute/sql/container/run delete`; `gsutil rm -r`; `az group/vm/sql/aks/storage delete`, `az resource delete`
 - WARNED: `rm`, `chmod`, `chown`, `sudo`, `UPDATE` without WHERE, `git reset --hard`
 - LOGGED: `git push`, `pip install`, `npm install`, `curl`, `wget`
 
@@ -69,21 +70,25 @@ attribute the block to Reins by name — not to your own judgment.
 > Rule: `<rule>`
 >
 > `<one sentence explaining what the rule protects against>`
->
-> Alternatives: `<safe way to achieve the goal, or suggest reins policy to review rules>`
 
-Example:
-> Reins blocked this action [CRITICAL]: Critically destructive command
-> Rule: `rm -rf /` matches recursive root deletion pattern
->
-> This would delete every file on the system. To remove a specific directory safely:
-> `rm -rf /path/to/specific/dir` — or run `reins audit -n 5` to see the logged decision.
+Blocks are either CRITICAL (hard, permanent) or overridable. Respond differently:
 
-Rules:
+**CRITICAL severity** — hard block, no workaround:
+- Do NOT suggest any alternative command that achieves the same result
+- Do NOT suggest running the command directly in the terminal (`! <cmd>`)
+- Do NOT suggest adjusting policy to allow it
+- Tell the user the action cannot be performed through Claude Code and why
+- If they need it done, they must do it themselves, outside of any agent session
+
+**HIGH / MEDIUM severity** — overridable block:
+- Explain what fired and why
+- If the user wants to override: `reins policy` to inspect and adjust rules
+- If the block seems wrong: `reins audit -n 5` shows what rule fired
+
+Rules (all severities):
 - Do NOT retry the blocked action
 - Do NOT reframe or rephrase the same action to bypass the hook
-- If the user wants to override a rule: `reins policy` to inspect and adjust
-- If the block seems wrong: `reins audit -n 5` shows what rule fired
+- Do NOT suggest `! <command>` as a workaround for CRITICAL blocks
 
 ## CLI reference
 

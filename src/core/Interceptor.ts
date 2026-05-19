@@ -11,6 +11,7 @@ import {
   SecurityRule,
   ExecutionContext,
   InterventionMetadata,
+  AuditContext,
 } from '../types';
 import { DEFAULT_POLICY } from '../config';
 import { Arbitrator } from './Arbitrator';
@@ -19,6 +20,7 @@ import { StatsTracker } from '../storage/StatsTracker';
 import { trustRateLimiter } from './TrustRateLimiter';
 import { logger } from './Logger';
 import chalk from 'chalk';
+import { buildAuditEnvelope } from '../lib/audit-schema';
 
 // ---------------------------------------------------------------------------
 // Path-policy helpers (no external dependency)
@@ -132,7 +134,8 @@ export class Interceptor {
     methodName: string,
     args: unknown[],
     sessionKey?: string,
-    intervention?: InterventionMetadata
+    intervention?: InterventionMetadata,
+    auditContext?: AuditContext
   ): Promise<void> {
     const baseRule = this.lookupRule(moduleName, methodName);
     // Path-policy check runs before intervention so a denied path is never
@@ -162,7 +165,8 @@ export class Interceptor {
       methodName,
       args,
       sessionKey,
-      normalizedIntervention
+      normalizedIntervention,
+      auditContext
     );
 
     if (!allowed) {
@@ -310,35 +314,58 @@ export class Interceptor {
     methodName: string,
     args: unknown[],
     sessionKey?: string,
-    intervention?: InterventionMetadata
+    intervention?: InterventionMetadata,
+    auditContext?: AuditContext
   ): Promise<boolean> {
     const startTime = Date.now();
 
     switch (rule.action) {
       case 'ALLOW': {
         const decisionTime = Date.now() - startTime;
+        const timestamp = new Date().toISOString();
         await this.logDecision({
-          timestamp: new Date().toISOString(),
+          timestamp,
           module: moduleName,
           method: methodName,
           args,
           decision: 'ALLOWED',
           reason: rule.description,
           decisionTime,
+          ...this.buildAuditRecordMetadata(
+            timestamp,
+            moduleName,
+            methodName,
+            args,
+            'ALLOWED',
+            rule.description,
+            undefined,
+            auditContext
+          ),
         });
         return true;
       }
 
       case 'DENY': {
         const decisionTime = Date.now() - startTime;
+        const timestamp = new Date().toISOString();
         await this.logDecision({
-          timestamp: new Date().toISOString(),
+          timestamp,
           module: moduleName,
           method: methodName,
           args,
           decision: 'BLOCKED',
           reason: rule.description || 'Policy: DENY',
           decisionTime,
+          ...this.buildAuditRecordMetadata(
+            timestamp,
+            moduleName,
+            methodName,
+            args,
+            'BLOCKED',
+            rule.description || 'Policy: DENY',
+            undefined,
+            auditContext
+          ),
         });
         return false;
       }
@@ -351,11 +378,13 @@ export class Interceptor {
           rule,
           sessionKey,
           intervention,
+          auditContext,
           onBlockCallback: this.onBlockCallback,
         };
 
         const approved = await this.arbitrator.judge(context);
         const decisionTime = Date.now() - startTime;
+        const timestamp = new Date().toISOString();
 
         if (!approved && process.stdin.isTTY) {
           // TTY: record denial for cooldown escalation.
@@ -364,7 +393,7 @@ export class Interceptor {
         // Channel mode: onBlockCallback is called inside judgeChannel() before stalling.
 
         await this.logDecision({
-          timestamp: new Date().toISOString(),
+          timestamp,
           module: moduleName,
           method: methodName,
           args,
@@ -372,6 +401,16 @@ export class Interceptor {
           userId: 'human',
           reason: rule.description,
           decisionTime,
+          ...this.buildAuditRecordMetadata(
+            timestamp,
+            moduleName,
+            methodName,
+            args,
+            approved ? 'APPROVED' : 'REJECTED',
+            rule.description,
+            undefined,
+            auditContext
+          ),
         });
 
         return approved;
@@ -400,5 +439,48 @@ export class Interceptor {
           : chalk.yellow(action);
 
     logger.info(`${chalk.cyan('Reins:')} ${moduleName}.${methodName}() → ${coloredAction}`);
+  }
+
+  private buildAuditRecordMetadata(
+    timestamp: string,
+    moduleName: string,
+    methodName: string,
+    args: unknown[],
+    decision: DecisionRecord['decision'],
+    reason: string | undefined,
+    severity: string | undefined,
+    auditContext?: AuditContext
+  ): Omit<
+    DecisionRecord,
+    'timestamp' | 'module' | 'method' | 'args' | 'decision' | 'reason' | 'decisionTime'
+  > {
+    const envelope = buildAuditEnvelope({
+      timestamp,
+      agentType: auditContext?.agentType || 'unknown',
+      sessionId: auditContext?.sessionId,
+      toolName: `${moduleName}.${methodName}`,
+      moduleName,
+      methodName,
+      payload: args,
+      decision,
+      policyId: auditContext?.policyId ?? `${moduleName}.${methodName}`,
+      reason,
+      severity,
+      metadataSources: [args, auditContext],
+    });
+
+    return {
+      schema_version: envelope.schema_version,
+      agent_type: envelope.agent_type,
+      session_id: envelope.session_id,
+      run_id: envelope.run_id,
+      run_started_at: envelope.run_started_at,
+      run_ended_at: envelope.run_ended_at,
+      principal: auditContext?.principal ?? envelope.principal,
+      model: auditContext?.model ?? envelope.model,
+      tokens: auditContext?.tokens ?? envelope.tokens,
+      touched_resources: envelope.touched_resources,
+      policy_decisions: envelope.policy_decisions,
+    };
   }
 }

@@ -6,6 +6,13 @@
 import https from 'https';
 import http from 'http';
 import { URL } from 'url';
+import type {
+  AuditAgentType,
+  AuditPolicyDecision,
+  AuditPrincipal,
+  AuditTokenUsage,
+  TouchedResource,
+} from './audit-schema';
 
 // ─── Exported interfaces ───────────────────────────────────────────────────
 
@@ -148,6 +155,7 @@ export interface RunStartPayload {
   hostname: string;
   cwd: string;
   claude_code_session_id?: string;
+  [key: string]: unknown;
 }
 
 export interface RunResult {
@@ -168,6 +176,15 @@ export interface PolicyDecision {
   method: string;
   reason?: string;
   run_id?: string | null;
+  schema_version?: string;
+  session_id?: string | null;
+  agent_type?: AuditAgentType;
+  principal?: string | AuditPrincipal | null;
+  model?: string | null;
+  tokens?: AuditTokenUsage | null;
+  touched_resources?: TouchedResource[];
+  policy_decisions?: AuditPolicyDecision[];
+  [key: string]: unknown;
 }
 
 // ─── Internal helpers ──────────────────────────────────────────────────────
@@ -650,16 +667,22 @@ export async function ingestDecisions(
   timeoutMs = 200
 ): Promise<{ status: number }> {
   const url = buildWatchtowerUrl(baseUrl, '/api/ingest/decisions');
-  const payload = decisions.map((d) => ({
-    timestamp: d.timestamp,
-    module: d.module,
-    method: d.method,
-    tool: d.tool,
-    decision: d.decision,
-    reason: d.reason ?? d.rule,
-    decisionTime: d.decisionTime,
-    run_id: d.run_id ?? null,
-  }));
+  const payload = decisions.map((d) => {
+    const normalized = {
+      ...d,
+      timestamp: d.timestamp,
+      module: d.module,
+      method: d.method,
+      tool: d.tool,
+      action: d.action,
+      decision: d.decision,
+      reason: d.reason ?? d.rule ?? d.action,
+      decisionTime: d.decisionTime,
+      run_id: d.run_id ?? null,
+    };
+
+    return normalized;
+  });
   const { status } = await nodeRequest('POST', url, apiKeyHeaders(apiKey), JSON.stringify(payload), timeoutMs);
   return { status };
 }
