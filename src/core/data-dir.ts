@@ -3,7 +3,20 @@ import os from 'os';
 import path from 'path';
 
 export function getOpenclawHome(): string {
-  return process.env.OPENCLAW_HOME || path.join(os.homedir(), '.openclaw');
+  if (process.env.OPENCLAW_HOME) return process.env.OPENCLAW_HOME;
+
+  const home = os.homedir();
+
+  // Prefer an already-existing openclaw home
+  const openclawHome = path.join(home, '.openclaw');
+  if (existsSync(openclawHome)) return openclawHome;
+
+  // If Claude Code is present but not OpenClaw, use ~/.claude/reins
+  const claudeHome = path.join(home, '.claude');
+  if (existsSync(claudeHome)) return claudeHome;
+
+  // Fall back to ~/.openclaw (will be created on first write)
+  return openclawHome;
 }
 
 export function getReinsDataDir(): string {

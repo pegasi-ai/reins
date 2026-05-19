@@ -1,13 +1,22 @@
 #!/bin/sh
-# Reins PreToolUse hook — wrapper for the globally installed @pegasi/reins package.
-# Requires: npm install -g @pegasi/reins
+# Reins PreToolUse hook — resolves from plugin root, falls back to global install.
 set -e
 
-REINS_ROOT="$(npm root -g 2>/dev/null)/@pegasi/reins"
-HOOK="$REINS_ROOT/dist/hooks/pre-tool-use.js"
+# When invoked via the Claude Code plugin system, CLAUDE_PLUGIN_ROOT is set.
+if [ -n "$CLAUDE_PLUGIN_ROOT" ]; then
+  HOOK="$CLAUDE_PLUGIN_ROOT/../../dist/hooks/pre-tool-use.js"
+  if [ ! -f "$HOOK" ]; then
+    # Plugin root is the plugin/ subdir; dist/ is at the repo root
+    HOOK="$(dirname "$CLAUDE_PLUGIN_ROOT")/../dist/hooks/pre-tool-use.js"
+  fi
+else
+  # Fallback: globally installed package
+  REINS_ROOT="$(npm root -g 2>/dev/null)/@pegasi-ai/reins"
+  HOOK="$REINS_ROOT/dist/hooks/pre-tool-use.js"
+fi
 
 if [ ! -f "$HOOK" ]; then
-  echo '{"decision":"WARN","reason":"Reins not installed. Run: npm install -g @pegasi/reins && reins init"}' >&2
+  echo '{"decision":"WARN","reason":"Reins not found. Run: npm install -g @pegasi-ai/reins && reins init"}' >&2
   exit 0
 fi
 

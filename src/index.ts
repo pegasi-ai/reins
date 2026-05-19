@@ -13,6 +13,23 @@ export { PolicyStore } from './storage/PolicyStore';
 export type { PersistedPolicy } from './storage/PolicyStore';
 export { DecisionLog } from './storage/DecisionLog';
 export type { DecisionRecord } from './storage/DecisionLog';
+export {
+  AUDIT_SCHEMA_VERSION,
+  buildAuditEnvelope,
+  buildTouchedResources,
+  createAuditPolicyDecision,
+  extractModelFromSources,
+  extractTokenUsageFromSources,
+  resolvePrincipalSync,
+} from './lib/audit-schema';
+export type {
+  AuditAgentType,
+  AuditEnvelope,
+  AuditPolicyDecision,
+  AuditPrincipal,
+  AuditTokenUsage,
+  TouchedResource,
+} from './lib/audit-schema';
 export { StatsTracker } from './storage/StatsTracker';
 export type { Stats } from './storage/StatsTracker';
 export { BrowserSessionStore } from './storage/BrowserSessionStore';

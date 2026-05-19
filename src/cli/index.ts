@@ -18,6 +18,11 @@ import { upgradeCommand } from './commands/upgrade';
 import { scanCommand } from './scan';
 import { statusCommand } from './commands/status';
 import { syncCommand } from './commands/sync';
+import { loginCommand } from './commands/login';
+import { logoutCommand } from './commands/logout';
+import { whoamiCommand } from './commands/whoami';
+import { internalBaseUrlCommand } from './commands/internal-base-url';
+import { isInternalBaseUrlSwitchingEnabled } from '../storage/WatchtowerConfig';
 
 function getCliVersion(): string {
   try {
@@ -100,5 +105,22 @@ program
 
 program.command('status').description('Show hook and Watchtower connection status').action(statusCommand);
 program.command('sync').description('Pull latest policies from Watchtower and flush pending audit entries').action(syncCommand);
+program
+  .command('login')
+  .description('Sign in to Reins Cloud')
+  .option('--github', 'Use GitHub SSO')
+  .option('--magic-link', 'Use email magic link')
+  .option('--email <email>', 'Email address for magic link login')
+  .option('--no-browser', 'Print the GitHub sign-in URL instead of opening a browser')
+  .action(loginCommand);
+program.command('logout').description('Sign out of Reins Cloud').action(logoutCommand);
+program.command('whoami').description('Show the authenticated Reins Cloud user').action(whoamiCommand);
+
+if (isInternalBaseUrlSwitchingEnabled()) {
+  program
+    .command('internal-base-url [target]')
+    .description('Internal: switch Reins Cloud base URL target')
+    .action(internalBaseUrlCommand);
+}
 
 program.parse();

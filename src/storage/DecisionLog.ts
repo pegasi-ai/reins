@@ -6,6 +6,13 @@
 import fs from 'fs-extra';
 import { logger } from '../core/Logger';
 import { getDataPath, getPreferredDataPath, getReinsDataDir } from '../core/data-dir';
+import type {
+  AuditAgentType,
+  AuditPolicyDecision,
+  AuditPrincipal,
+  AuditTokenUsage,
+  TouchedResource,
+} from '../lib/audit-schema';
 
 export interface DecisionRecord {
   timestamp: string;
@@ -15,6 +22,7 @@ export interface DecisionRecord {
   decision: 'ALLOWED' | 'APPROVED' | 'REJECTED' | 'BLOCKED';
   userId?: string;
   decisionTime: number; // milliseconds
+  decision_time_ms?: number;
   reason?: string;
   eventType?:
     | 'destructive_detected'
@@ -33,6 +41,20 @@ export interface DecisionRecord {
   approved?: boolean;
   decisionInput?: 'yes' | 'allow' | 'no' | 'confirm';
   confirmation?: string;
+  schema_version?: string;
+  agent_type?: AuditAgentType;
+  session_id?: string | null;
+  run_id?: string | null;
+  run_started_at?: string | null;
+  run_ended_at?: string | null;
+  principal?: AuditPrincipal | null;
+  model?: string | null;
+  tokens?: AuditTokenUsage | null;
+  touched_resources?: TouchedResource[];
+  policy_decisions?: AuditPolicyDecision[];
+  user?: string;
+  hostname?: string;
+  cwd?: string;
 }
 
 export class DecisionLog {

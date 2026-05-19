@@ -20,6 +20,16 @@ import {
 } from '../core/DestructiveClassifier';
 import { DecisionLog } from '../storage/DecisionLog';
 import crypto from 'crypto';
+import {
+  AuditPolicyDecision,
+  AuditTokenUsage,
+  TouchedResource,
+  buildAuditEnvelope,
+  buildTouchedResources,
+  createAuditPolicyDecision,
+  extractModelFromSources,
+  extractTokenUsageFromSources,
+} from '../lib/audit-schema';
 
 /**
  * Mapping from flat OpenClaw tool names to Reins module/method pairs.
@@ -99,6 +109,19 @@ export interface ToolContext {
   agentId?: string;
   sessionKey?: string;
   toolName: string;
+  model?: string;
+  usage?: unknown;
+  tokenUsage?: unknown;
+}
+
+interface OpenClawAuditContext {
+  agentType: 'openclaw';
+  sessionId?: string;
+  policyId: string;
+  model: string | null;
+  tokens: AuditTokenUsage | null;
+  touchedResources: TouchedResource[];
+  policyDecisions?: AuditPolicyDecision[];
 }
 
 export interface BeforeToolCallResult {
@@ -117,6 +140,27 @@ export function createToolCallHook(
     const mapping = TOOL_TO_MODULE[toolName.toLowerCase()];
     const moduleName = mapping?.module ?? 'Unknown';
     const methodName = mapping?.method ?? toolName;
+    const policyId = `${moduleName}.${methodName}`;
+    const auditTimestamp = new Date().toISOString();
+    const model = extractModelFromSources([event, ctx]);
+    const tokens = extractTokenUsageFromSources([event, ctx]);
+    const touchedResources = buildTouchedResources({
+      timestamp: auditTimestamp,
+      toolName,
+      moduleName,
+      methodName,
+      payload: event.params,
+      decision: 'ALLOWED',
+      policyId,
+    });
+    const auditContext: OpenClawAuditContext = {
+      agentType: 'openclaw',
+      sessionId: ctx.sessionKey,
+      policyId,
+      model,
+      tokens,
+      touchedResources,
+    };
 
     let params = event.params;
     let shouldReturnParams = false;
@@ -167,6 +211,10 @@ export function createToolCallHook(
         bulkCount: destructiveClassification.bulkCount,
         target: destructiveClassification.target,
         argsHash: hashArgs(params),
+        sessionId: ctx.sessionKey,
+        model,
+        tokens,
+        policyId,
       });
     }
 
@@ -202,11 +250,15 @@ export function createToolCallHook(
         target: destructiveClassification.target,
         summary: intervention.actionSummary,
         requireToken: intervention.confirmationToken,
+        sessionId: ctx.sessionKey,
+        model,
+        tokens,
+        policyId,
       });
     }
 
     try {
-      await interceptor.evaluate(moduleName, methodName, [params], ctx.sessionKey, intervention);
+      await interceptor.evaluate(moduleName, methodName, [params], ctx.sessionKey, intervention, auditContext);
       if (destructiveClassification?.isDestructive) {
         logInterceptEvent({
           eventType: 'tool_executed',
@@ -218,6 +270,10 @@ export function createToolCallHook(
           reasons: destructiveClassification.reasons,
           bulkCount: destructiveClassification.bulkCount,
           target: destructiveClassification.target,
+          sessionId: ctx.sessionKey,
+          model,
+          tokens,
+          policyId,
         });
       }
       return shouldReturnParams ? { params } : {};
@@ -239,6 +295,10 @@ export function createToolCallHook(
           bulkCount: destructiveClassification.bulkCount,
           target: destructiveClassification.target,
           summary: reason,
+          sessionId: ctx.sessionKey,
+          model,
+          tokens,
+          policyId,
         });
       }
       return { block: true, blockReason: reason };
@@ -433,6 +493,10 @@ interface InterceptEventInput {
   approved?: boolean;
   decisionInput?: 'yes' | 'allow' | 'no' | 'confirm';
   confirmation?: string;
+  sessionId?: string;
+  model?: string | null;
+  tokens?: AuditTokenUsage | null;
+  policyId?: string | null;
 }
 
 function logInterceptEvent(input: InterceptEventInput): void {
@@ -443,9 +507,36 @@ function logInterceptEvent(input: InterceptEventInput): void {
     tool_executed: 'ALLOWED',
     tool_blocked: 'BLOCKED',
   };
+  const timestamp = new Date().toISOString();
+  const envelope = buildAuditEnvelope({
+    timestamp,
+    agentType: 'openclaw',
+    sessionId: input.sessionId,
+    toolName: input.toolName,
+    moduleName: input.moduleName,
+    methodName: input.methodName,
+    payload: input.params,
+    decision: defaultDecisionByEvent[input.eventType],
+    policyId: input.policyId ?? `${input.moduleName}.${input.methodName}`,
+    reason: input.summary ?? input.eventType,
+    severity: input.severity,
+    interventionType: input.eventType,
+    policyDecisions: (() => {
+      const entry = createAuditPolicyDecision({
+        timestamp,
+        decision: defaultDecisionByEvent[input.eventType],
+        policyId: input.policyId ?? `${input.moduleName}.${input.methodName}`,
+        reason: input.summary ?? input.eventType,
+        severity: input.severity,
+        interventionType: input.eventType,
+      });
+      return entry ? [entry] : [];
+    })(),
+    metadataSources: [input.params, input],
+  });
 
   void DecisionLog.append({
-    timestamp: new Date().toISOString(),
+    timestamp,
     module: input.moduleName,
     method: input.methodName,
     args: [input.params],
@@ -464,6 +555,17 @@ function logInterceptEvent(input: InterceptEventInput): void {
     approved: input.approved,
     decisionInput: input.decisionInput,
     confirmation: input.confirmation,
+    schema_version: envelope.schema_version,
+    agent_type: envelope.agent_type,
+    session_id: envelope.session_id,
+    run_id: envelope.run_id,
+    run_started_at: envelope.run_started_at,
+    run_ended_at: envelope.run_ended_at,
+    principal: envelope.principal,
+    model: input.model ?? envelope.model,
+    tokens: input.tokens ?? envelope.tokens,
+    touched_resources: envelope.touched_resources,
+    policy_decisions: envelope.policy_decisions,
   });
 }
 

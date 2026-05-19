@@ -50,7 +50,9 @@ function printHelp() {
   console.log('');
   console.log('Endpoints:');
   console.log('  POST /api/watchtower/connect');
+  console.log('  POST /api/ingest/runs/start');
   console.log('  POST /api/scan-artifacts/ingest');
+  console.log('  POST /api/ingest/decisions');
   console.log('  GET  /dashboard/:id');
   console.log('  GET  /_mock/requests');
 }
@@ -197,6 +199,63 @@ const server = http.createServer(async (request, response) => {
         ok: true,
         storedAt: filePath,
       });
+      return;
+    }
+
+    if (request.method === 'POST' && requestUrl.pathname === '/api/ingest/runs/start') {
+      const authHeader = String(request.headers['authorization'] || '').trim();
+      const apiKey = authHeader.startsWith('Bearer ') ? authHeader.slice(7).trim() : '';
+      if (!apiKey || !connections.has(apiKey)) {
+        json(response, 401, { error: 'invalid authorization' });
+        return;
+      }
+
+      const body = await readJson(request);
+      const runId = `mock-run-${Date.now()}-${crypto.randomBytes(3).toString('hex')}`;
+      const filePath = path.join(options.outputDir, `${nowStamp()}-run-start.json`);
+      writeFileSync(filePath, JSON.stringify({ run_id: runId, request: body }, null, 2));
+
+      requests.push({
+        kind: 'run-start',
+        method: request.method,
+        path: requestUrl.pathname,
+        headers: request.headers,
+        body,
+        filePath,
+        createdAt: new Date().toISOString(),
+      });
+
+      console.log(`[mock-watchtower] run started (${runId}) -> ${filePath}`);
+      json(response, 200, { run_id: runId });
+      return;
+    }
+
+    if (request.method === 'POST' && requestUrl.pathname === '/api/ingest/decisions') {
+      const authHeader = String(request.headers['authorization'] || '').trim();
+      const apiKey = authHeader.startsWith('Bearer ') ? authHeader.slice(7).trim() : '';
+      if (!apiKey || !connections.has(apiKey)) {
+        json(response, 401, { error: 'invalid authorization' });
+        return;
+      }
+
+      const body = await readJson(request);
+      const entries = Array.isArray(body) ? body : [body];
+      const ids = entries.map((_, i) => `mock-decision-${Date.now()}-${i}`);
+      const filePath = path.join(options.outputDir, `${nowStamp()}-decisions.json`);
+      writeFileSync(filePath, JSON.stringify(entries, null, 2));
+
+      requests.push({
+        kind: 'decisions',
+        method: request.method,
+        path: requestUrl.pathname,
+        headers: request.headers,
+        body: entries,
+        filePath,
+        createdAt: new Date().toISOString(),
+      });
+
+      console.log(`[mock-watchtower] decisions received (${entries.length}) -> ${filePath}`);
+      json(response, 200, { inserted: entries.length, ids });
       return;
     }
 

@@ -32,12 +32,25 @@ export async function auditCommand(options: { lines: string }): Promise<void> {
         record.decision === 'ALLOWED' || record.decision === 'APPROVED' ? chalk.green : chalk.red;
 
       const decisionText = decisionColor(record.decision.padEnd(10));
-      const timeText = chalk.dim(`${(record.decisionTime / 1000).toFixed(1)}s`.padStart(6));
+      const decisionTime = typeof record.decisionTime === 'number'
+        ? record.decisionTime
+        : typeof (record as { decision_time_ms?: unknown }).decision_time_ms === 'number'
+          ? (record as { decision_time_ms: number }).decision_time_ms
+          : 0;
+      const timeText = chalk.dim(`${(decisionTime / 1000).toFixed(1)}s`.padStart(6));
       const userText = record.userId ? chalk.dim(` (${record.userId})`) : '';
       const reasonText = record.reason ? chalk.dim(` - ${record.reason}`) : '';
+      const agentText = record.agent_type ? chalk.dim(` [${record.agent_type}]`) : '';
+      const modelText = record.model ? chalk.dim(` ${record.model}`) : '';
+      const sessionText = record.session_id ? chalk.dim(` session:${record.session_id}`) : '';
+      const principalText = record.principal?.email
+        ? chalk.dim(` principal:${record.principal.email}`)
+        : record.principal?.id
+          ? chalk.dim(` principal:${record.principal.id}`)
+          : '';
 
       console.log(
-        `${chalk.dim(timestamp)} | ${chalk.cyan(`${record.module}.${record.method}`.padEnd(25))} | ${decisionText} | ${timeText}${userText}${reasonText}`
+        `${chalk.dim(timestamp)} | ${chalk.cyan(`${record.module}.${record.method}`.padEnd(25))} | ${decisionText} | ${timeText}${agentText}${modelText}${sessionText}${principalText}${userText}${reasonText}`
       );
     });
 

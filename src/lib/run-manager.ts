@@ -6,9 +6,10 @@
 import fs from 'fs';
 import { getDataPath, getPreferredDataPath, getReinsDataDir } from '../core/data-dir';
 
-interface CurrentRun {
+export interface CurrentRun {
   run_id: string;
   started_at: string;
+  ended_at?: string | null;
 }
 
 function ensureRunDir(): void {
@@ -18,10 +19,7 @@ function ensureRunDir(): void {
   }
 }
 
-/**
- * Sync-read current_run.json and return the run_id, or null if missing/invalid.
- */
-export function getCurrentRunId(): string | null {
+export function getCurrentRunState(): CurrentRun | null {
   try {
     const currentRunFile = getDataPath('current_run.json');
     if (!fs.existsSync(currentRunFile)) {
@@ -30,15 +28,27 @@ export function getCurrentRunId(): string | null {
     const raw = fs.readFileSync(currentRunFile, 'utf8');
     const parsed = JSON.parse(raw) as unknown;
     if (parsed && typeof parsed === 'object') {
-      const r = parsed as Record<string, unknown>;
-      if (typeof r['run_id'] === 'string' && r['run_id'].length > 0) {
-        return r['run_id'];
+      const record = parsed as Record<string, unknown>;
+      if (typeof record['run_id'] === 'string' && record['run_id'].length > 0) {
+        return {
+          run_id: record['run_id'],
+          started_at:
+            typeof record['started_at'] === 'string' ? record['started_at'] : new Date().toISOString(),
+          ended_at: typeof record['ended_at'] === 'string' ? record['ended_at'] : null,
+        };
       }
     }
     return null;
   } catch {
     return null;
   }
+}
+
+/**
+ * Sync-read current_run.json and return the run_id, or null if missing/invalid.
+ */
+export function getCurrentRunId(): string | null {
+  return getCurrentRunState()?.run_id ?? null;
 }
 
 /**

@@ -68,19 +68,17 @@ export async function statusCommand(): Promise<void> {
   console.log(chalk.bold('Hooks'));
   const hooks = hooksStatus();
 
-  const projectLabel = 'Project (.claude/settings.json):';
-  const globalLabel  = 'Global (~/.claude/settings.json):';
+  for (const target of hooks.targets) {
+    if (!target.exists && target.agentType === 'cowork') {
+      console.log(`  ${target.label.padEnd(42)} ${chalk.dim('not detected')}`);
+      continue;
+    }
 
-  if (hooks.projectInstalled) {
-    console.log(`  ${projectLabel.padEnd(42)} ${chalk.green('✅ installed')}`);
-  } else {
-    console.log(`  ${projectLabel.padEnd(42)} ${chalk.red('❌ not installed')}`);
-  }
-
-  if (hooks.globalInstalled) {
-    console.log(`  ${globalLabel.padEnd(42)} ${chalk.green('✅ installed')}`);
-  } else {
-    console.log(`  ${globalLabel.padEnd(42)} ${chalk.red('❌ not installed')}`);
+    if (target.installed) {
+      console.log(`  ${target.label.padEnd(42)} ${chalk.green('✅ installed')}`);
+    } else {
+      console.log(`  ${target.label.padEnd(42)} ${chalk.red('❌ not installed')}`);
+    }
   }
 
   console.log('');

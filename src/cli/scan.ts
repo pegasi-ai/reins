@@ -9,6 +9,7 @@ import chalk from 'chalk';
 import os from 'os';
 import path from 'path';
 import { FixAction, FixResult, ScanCheck, ScanReport, SecurityScanner } from '../core/SecurityScanner';
+import { ClaudeCodeScanner } from '../core/ClaudeCodeScanner';
 import { logger } from '../core/Logger';
 import {
   ConfigDiffEntry,
@@ -20,12 +21,13 @@ import {
   WatchtowerScanArtifact,
   writeWatchtowerArtifact,
 } from './watchtower-artifact';
-import { buildWatchtowerApiUrl, connectWatchtowerAccount, uploadWatchtowerArtifact } from './watchtower';
+import { buildWatchtowerApiUrl, uploadWatchtowerArtifact } from './watchtower';
 import {
   DEFAULT_WATCHTOWER_BASE_URL,
+  loadWatchtowerSettings,
   resolveWatchtowerCredentials,
-  saveWatchtowerSettings,
 } from '../storage/WatchtowerConfig';
+import { runCliLoginFlow } from './auth';
 
 interface ScanCommandOptions {
   alertCommand?: string;
@@ -74,7 +76,24 @@ export async function scanCommand(options: ScanCommandOptions): Promise<void> {
     }
 
     const scanner = new SecurityScanner();
-    let report = await scanner.run();
+    const [baseReport, claudeScanResult] = await Promise.all([
+      scanner.run(),
+      new ClaudeCodeScanner().run(),
+    ]);
+
+    const mergedChecks: ScanCheck[] = [...baseReport.checks, ...claudeScanResult.checks];
+    const claudeInventory = claudeScanResult.inventory;
+    let report: ScanReport = {
+      checks: mergedChecks,
+      score: mergedChecks.filter((c) => c.status === 'PASS').length,
+      total: mergedChecks.length,
+      verdict: mergedChecks.some((c) => c.status === 'FAIL')
+        ? 'EXPOSED'
+        : mergedChecks.some((c) => c.status === 'WARN')
+          ? 'NEEDS ATTENTION'
+          : 'SECURE',
+      timestamp: baseReport.timestamp,
+    };
     let monitorComparison: DriftComparison | null = null;
     const command = renderScanCommand();
 
@@ -83,6 +102,7 @@ export async function scanCommand(options: ScanCommandOptions): Promise<void> {
         command,
         report,
         monitorComparison,
+        inventory: claudeInventory,
       });
       await maybeUploadWatchtowerArtifact(artifact, true);
       console.log(JSON.stringify(report, null, 2));
@@ -123,6 +143,7 @@ export async function scanCommand(options: ScanCommandOptions): Promise<void> {
       command,
       report,
       monitorComparison,
+      inventory: claudeInventory,
     });
     renderWatchtowerArtifactSummary(artifactPath);
     await maybeUploadWatchtowerArtifact(artifact, false);
@@ -141,7 +162,24 @@ export async function scanCommand(options: ScanCommandOptions): Promise<void> {
 
 export async function runSetupScan(): Promise<SetupScanResult> {
   const scanner = new SecurityScanner();
-  const report = await scanner.run();
+  const [baseReport, claudeScanResult] = await Promise.all([
+    scanner.run(),
+    new ClaudeCodeScanner().run(),
+  ]);
+
+  const mergedChecks: ScanCheck[] = [...baseReport.checks, ...claudeScanResult.checks];
+  const report: ScanReport = {
+    checks: mergedChecks,
+    score: mergedChecks.filter((c) => c.status === 'PASS').length,
+    total: mergedChecks.length,
+    verdict: mergedChecks.some((c) => c.status === 'FAIL')
+      ? 'EXPOSED'
+      : mergedChecks.some((c) => c.status === 'WARN')
+        ? 'NEEDS ATTENTION'
+        : 'SECURE',
+    timestamp: baseReport.timestamp,
+  };
+  const claudeInventory = claudeScanResult.inventory;
   const command = 'reins init';
 
   renderTerminalReport(report);
@@ -153,6 +191,7 @@ export async function runSetupScan(): Promise<SetupScanResult> {
     command,
     report,
     monitorComparison: null,
+    inventory: claudeInventory,
   });
   renderWatchtowerArtifactSummary(artifactPath);
   const uploadResult = await maybeUploadWatchtowerArtifact(artifact, false);
@@ -768,7 +807,7 @@ async function maybeUploadWatchtowerArtifact(
     if (!quiet) {
       console.log(chalk.bold('Watchtower Upload:'));
       console.log(
-        `  ${chalk.dim('Upload skipped because Watchtower is not connected. Use REINS_WATCHTOWER_BASE_URL + REINS_WATCHTOWER_API_KEY for CI/CD and other headless environments.')}`
+        `  ${chalk.dim('Upload skipped because Watchtower is not connected. Run `reins login` interactively, or use REINS_WATCHTOWER_BASE_URL + REINS_WATCHTOWER_API_KEY in headless environments.')}`
       );
     }
     return {
@@ -805,33 +844,33 @@ async function maybeUploadWatchtowerArtifact(
 
 export async function enrollWatchtowerWithEmail(
   email: string,
-  artifact: WatchtowerScanArtifact,
-  baseUrl = process.env.REINS_WATCHTOWER_BASE_URL?.trim()
-    || process.env.CLAWREINS_WATCHTOWER_BASE_URL?.trim()
-    || DEFAULT_WATCHTOWER_BASE_URL
+  _artifact: WatchtowerScanArtifact,
+  baseUrl?: string
 ): Promise<{ configPath: string | null; dashboardUrl: string; message?: string; status: 'created' | 'existing' }> {
-  const enrollment = await connectWatchtowerAccount(baseUrl, email, artifact);
-  let configPath: string | null = null;
-
-  if (enrollment.apiKey) {
-    configPath = await saveWatchtowerSettings({
-      apiKey: enrollment.apiKey,
-      baseUrl: enrollment.baseUrl,
-      dashboardUrl: enrollment.dashboardUrl,
-      email: enrollment.email,
-    });
-  }
+  const watchtowerSettings = await loadWatchtowerSettings();
+  const resolvedBaseUrl =
+    baseUrl?.trim()
+    || watchtowerSettings?.baseUrl?.trim()
+    || process.env.REINS_WATCHTOWER_BASE_URL?.trim()
+    || process.env.CLAWREINS_WATCHTOWER_BASE_URL?.trim()
+    || DEFAULT_WATCHTOWER_BASE_URL;
+  const login = await runCliLoginFlow({
+    baseUrl: resolvedBaseUrl,
+    email,
+    method: 'magic_link',
+    openBrowser: false,
+  });
 
   return {
-    configPath,
-    dashboardUrl: enrollment.dashboardUrl,
-    message: enrollment.message,
-    status: enrollment.status,
+    configPath: login.configPath,
+    dashboardUrl: login.dashboardUrl,
+    message: undefined,
+    status: 'created',
   };
 }
 
 async function maybeConnectWatchtowerInteractively(
-  artifact: WatchtowerScanArtifact
+  _artifact: WatchtowerScanArtifact
 ): Promise<Awaited<ReturnType<typeof resolveWatchtowerCredentials>>> {
   if (!process.stdin.isTTY || !process.stdout.isTTY) {
     return null;
@@ -853,34 +892,16 @@ async function maybeConnectWatchtowerInteractively(
     return null;
   }
 
-  const { email } = await inquirer.prompt([
-    {
-      type: 'input',
-      name: 'email',
-      message: 'Email',
-      validate: (value: string) =>
-        /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.trim()) ? true : 'Enter a valid email address.',
-    },
-  ]);
-
   try {
-    const outcome = await enrollWatchtowerWithEmail(email.trim(), artifact);
-    console.log(`  ${chalk.dim(`Dashboard: ${outcome.dashboardUrl}`)}`);
-    console.log(`  ${chalk.dim('Check your email for your magic link.')}`);
-
-    if (outcome.status === 'created' && outcome.configPath) {
-      console.log(`  ${chalk.green('✅ Connected!')} ${chalk.dim(`API key saved to ${outcome.configPath}`)}`);
-      console.log(`  ${chalk.green('Next scan will upload automatically.')}`);
-      return await resolveWatchtowerCredentials();
-    }
-
-    if (outcome.message) {
-      console.log(`  ${chalk.yellow(outcome.message)}`);
-    } else {
-      console.log(`  ${chalk.yellow('Account already exists, and no new API key was issued.')}`);
-    }
-    console.log(`  ${chalk.yellow('Automatic upload will work once the original API key is available in ~/.openclaw/reins/config.json or via env vars.')}`);
-
+    const watchtowerSettings = await loadWatchtowerSettings();
+    const baseUrl =
+      watchtowerSettings?.baseUrl?.trim()
+      || process.env.REINS_WATCHTOWER_BASE_URL?.trim()
+      || process.env.CLAWREINS_WATCHTOWER_BASE_URL?.trim()
+      || DEFAULT_WATCHTOWER_BASE_URL;
+    const login = await runCliLoginFlow({ baseUrl });
+    console.log(`  ${chalk.green('✅ Connected!')} ${chalk.dim(`Dashboard: ${login.dashboardUrl}`)}`);
+    console.log(`  ${chalk.green('Next scan will upload automatically.')}`);
     return await resolveWatchtowerCredentials();
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);

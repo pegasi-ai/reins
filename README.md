@@ -18,7 +18,9 @@
 
 > In Greek myth, Athena gave Bellerophon the golden bridle — reins included — that let him guide Pegasus. Reins applies the same idea to AI agents: raw power is not enough — what matters is making it controllable.
 
-Reins enforces deterministic security policies on every agent action, scans your configs for OWASP ASI10 vulnerabilities, and tracks drift over time. Policies evaluate in under 50ms. Works with Claude Code PreToolUse and PostToolUse hooks, OpenClaw, and any MCP-compatible agent.
+Reins enforces deterministic security policies on every agent action, scans your configs for OWASP ASI10 vulnerabilities, and tracks drift over time. Policies evaluate in under 50ms. Works with Claude Code and Cowork hook pipelines, OpenClaw, and any MCP-compatible agent.
+
+It also gives security teams one audit log across the agent fleet instead of fragmented logs per tool.
 
 ## Quickstart
 
@@ -49,7 +51,7 @@ An OpenClaw agent tries to bulk-delete 4,382 Gmail messages. Reins blocks it bef
 
 - **Prevent** — Block destructive actions before execution. Score irreversibility. Detect risky browser state.
 - **Pause** — Route high-impact actions through terminal or messaging approval flows. Require explicit `CONFIRM-*` tokens for catastrophic operations.
-- **Prove** — Preserve an immutable audit trail of every decision, approval, and block.
+- **Prove** — Preserve a versioned, immutable audit trail of every decision, approval, block, touched resource, and policy intervention.
 
 ## Security guarantees
 
