@@ -28,6 +28,20 @@ export interface SecurityRule {
    * Examples: ["/etc/GLOB", "~/.ssh/GLOB", "GLOB/.env"]  (GLOB = **)
    */
   denyPaths?: string[];
+  /**
+   * Session key prefixes for which this rule is automatically ALLOW regardless of action.
+   * Blanket: allows ALL calls to this module.method for matching sessions.
+   */
+  allowForSessionKeys?: string[];
+  /**
+   * Granular per-session allows. Each entry requires both a session key prefix match AND a
+   * glob match on the primary arg (path, command, url). More precise than allowForSessionKeys.
+   * Example: [{sessionKeyPrefix:"agent:main:cron:abc", argGlob:"/tmp/reports/**"}]
+   */
+  allowForSessionGranular?: Array<{
+    sessionKeyPrefix: string;
+    argGlob: string;
+  }>;
 }
 
 /**

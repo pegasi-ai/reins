@@ -34,7 +34,7 @@ function expandTilde(raw: string): string {
 }
 
 function matchesGlob(pattern: string, str: string): boolean {
-  const norm = str.replace(/\\/g, '/');
+  const norm = expandTilde(str).replace(/\\/g, '/');
   const pat = expandTilde(pattern).replace(/\\/g, '/');
 
   const regex = pat
@@ -46,6 +46,25 @@ function matchesGlob(pattern: string, str: string): boolean {
     .replace(/\x00/g, '.*');             // standalone ** → anything
 
   return new RegExp(`^${regex}$`).test(norm);
+}
+
+/**
+ * Extract the primary arg value for a tool call, used for granular session allow matching.
+ * Returns the raw string value (not resolved) so globs can match commands and URLs too.
+ */
+function extractPrimaryArg(moduleName: string, params: Record<string, unknown>): string | null {
+  if (moduleName === 'Browser' || moduleName === 'Network') {
+    const v = params.url ?? params.src ?? null;
+    return v != null ? String(v) : null;
+  }
+  if (moduleName === 'Shell') {
+    const v = params.command ?? params.cmd ?? null;
+    return v != null ? String(v) : null;
+  }
+  const raw = params.path ?? params.file_path ?? params.filePath ?? params.target ?? null;
+  if (raw != null) return path.resolve(expandTilde(String(raw)));
+  const first = Object.values(params)[0];
+  return first != null ? String(first) : null;
 }
 
 /**
@@ -124,6 +143,15 @@ export class Interceptor {
     this.logEnabled = logEnabled;
   }
 
+  /** Hot-reload the policy without restarting the gateway. */
+  reloadPolicy(policy: SecurityPolicy): void {
+    this.policy = policy;
+    logger.info('Interceptor: policy hot-reloaded', {
+      modules: Object.keys(policy.modules),
+      defaultAction: policy.defaultAction,
+    });
+  }
+
   /**
    * Evaluate the security policy for a tool call.
    */
@@ -134,7 +162,7 @@ export class Interceptor {
     sessionKey?: string,
     intervention?: InterventionMetadata
   ): Promise<void> {
-    const baseRule = this.lookupRule(moduleName, methodName);
+    const baseRule = this.lookupRule(moduleName, methodName, sessionKey, args);
     // Path-policy check runs before intervention so a denied path is never
     // upgradeable to ASK — it's a hard DENY.
     const originalRule = applyPathPolicy(baseRule, moduleName, args);
@@ -276,26 +304,41 @@ export class Interceptor {
     if (strict) {
       return (
         `${screenshotInstruction}` +
-        `⚠️ HIGH-RISK action requires explicit human confirmation.\n` +
         `Action: ${summary}\n` +
-        `An out-of-band approval notification has been sent to the human.\n` +
-        `WAIT — do NOT retry this tool. Do NOT attempt to self-approve.`
+        `WAIT — do NOT retry this tool. Do NOT attempt to proceed without explicit authorization.`
       );
     }
 
     return (
       `${screenshotInstruction}` +
       `Action: ${summary}\n` +
-      `An approval request has been sent to the human out-of-band.\n` +
-      `WAIT for their response before retrying. Do NOT attempt to self-approve.`
+      `WAIT for authorization before retrying. Do NOT attempt to proceed independently.`
     );
   }
 
-  private lookupRule(moduleName: string, methodName: string): SecurityRule {
+  private lookupRule(moduleName: string, methodName: string, sessionKey?: string, args?: unknown[]): SecurityRule {
     const moduleRules = this.policy.modules[moduleName];
+    const rule = moduleRules?.[methodName];
 
-    if (moduleRules && moduleRules[methodName]) {
-      return moduleRules[methodName];
+    if (rule) {
+      // Blanket session allow — matches all calls to this module.method.
+      if (sessionKey && rule.allowForSessionKeys?.some(prefix => sessionKey.startsWith(prefix))) {
+        return { action: 'ALLOW', description: `Allowed for session ${sessionKey}` };
+      }
+
+      // Granular session+arg allow — matches by session prefix AND primary arg glob.
+      if (sessionKey && args && rule.allowForSessionGranular?.length) {
+        const params = (args[0] as Record<string, unknown>) ?? {};
+        const primaryArg = extractPrimaryArg(moduleName, params);
+        if (primaryArg !== null) {
+          const matched = rule.allowForSessionGranular.some(
+            entry => sessionKey.startsWith(entry.sessionKeyPrefix) && matchesGlob(entry.argGlob, primaryArg)
+          );
+          if (matched) return { action: 'ALLOW', description: `Allowed for session ${sessionKey} with arg pattern` };
+        }
+      }
+
+      return rule;
     }
 
     return {
