@@ -21,8 +21,19 @@ import { getProtectedModules } from '../plugin/tool-interceptor';
 import { syncToolShieldDefaults } from '../toolshield/sync';
 import { runSetupScan } from './scan';
 import { installWatchtowerSchedule, supportsScheduledScans } from './scheduler';
-import { resolveWatchtowerCredentials, saveWatchtowerSettings, DEFAULT_WATCHTOWER_BASE_URL } from '../storage/WatchtowerConfig';
-import { signupCli, validateApiKey, fetchPolicies, fetchShellPolicies } from '../lib/watchtower-client';
+import {
+  resolveWatchtowerBootstrap,
+  resolveWatchtowerCredentials,
+  saveWatchtowerSettings,
+  DEFAULT_WATCHTOWER_BASE_URL,
+} from '../storage/WatchtowerConfig';
+import {
+  redeemReinsBootstrap,
+  signupCli,
+  validateApiKey,
+  fetchPolicies,
+  fetchShellPolicies,
+} from '../lib/watchtower-client';
 import { installClaudeCodeHooks } from '../lib/hook-installer';
 
 type SecurityLevel = 'permissive' | 'balanced' | 'strict' | 'custom';
@@ -262,6 +273,48 @@ async function maybeOfferWatchtowerSchedule(): Promise<string | null> {
   return result.descriptor;
 }
 
+async function connectWithEnterpriseBootstrap(jsonMode: boolean, warnings: string[]): Promise<boolean> {
+  const bootstrap = await resolveWatchtowerBootstrap();
+  if (!bootstrap) {
+    return false;
+  }
+
+  try {
+    if (!jsonMode) {
+      console.log(chalk.bold('Step 7: Redeeming enterprise bootstrap...'));
+      console.log(chalk.dim('  Using managed Reins Cloud bootstrap token.'));
+    }
+
+    const result = await redeemReinsBootstrap(bootstrap.token, bootstrap.baseUrl);
+    await saveWatchtowerSettings({
+      apiKey: result.api_key,
+      baseUrl: bootstrap.baseUrl,
+      dashboardUrl: result.dashboard_url,
+      org_id: result.organization?.id,
+      connectedAt: new Date().toISOString(),
+    });
+
+    if (!jsonMode) {
+      console.log(chalk.green('✅ Connected to Reins Cloud via enterprise bootstrap'));
+      if (result.organization) {
+        console.log(chalk.dim(`  Organization: ${result.organization.name} (${result.organization.id})`));
+      }
+      console.log(chalk.dim(`  Dashboard: ${result.dashboard_url ?? bootstrap.baseUrl}`));
+      console.log('');
+    }
+
+    return true;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    warnings.push(`Reins Cloud enterprise bootstrap failed: ${message}`);
+    if (!jsonMode) {
+      console.log(chalk.yellow(`⚠️  Enterprise bootstrap failed: ${message}`));
+      console.log('');
+    }
+    return false;
+  }
+}
+
 export async function initWizard(options: InitWizardOptions = {}): Promise<InitSuccessOutput> {
   const nonInteractive = options.nonInteractive === true;
   const jsonMode = options.json === true;
@@ -487,7 +540,9 @@ export async function initWizard(options: InitWizardOptions = {}): Promise<InitS
   }
 
   // Step 7: Watchtower API key + Claude Code hooks (interactive only)
-  if (!nonInteractive) {
+  const enterpriseConnected = await connectWithEnterpriseBootstrap(jsonMode, warnings);
+
+  if (!enterpriseConnected && !nonInteractive) {
     const { connectWatchtower } = await inquirer.prompt([{
       type: 'confirm',
       name: 'connectWatchtower',
@@ -546,6 +601,26 @@ export async function initWizard(options: InitWizardOptions = {}): Promise<InitS
     }
 
     // Install Claude Code hooks
+    if (!jsonMode) {
+      console.log(chalk.bold('Step 7b: Installing Claude Code hooks...'));
+    }
+    try {
+      const hookResult = await installClaudeCodeHooks();
+      if (!jsonMode) {
+        if (hookResult.alreadyInstalled) {
+          console.log(chalk.green('✅ Claude Code hooks already installed'));
+        } else {
+          console.log(chalk.green(`✅ Claude Code hooks installed at ${hookResult.path}`));
+        }
+      }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      warnings.push(`Claude Code hook installation failed: ${msg}`);
+      if (!jsonMode) {
+        console.log(chalk.yellow(`⚠️  Hook installation failed: ${msg}`));
+      }
+    }
+  } else {
     if (!jsonMode) {
       console.log(chalk.bold('Step 7b: Installing Claude Code hooks...'));
     }
