@@ -44,17 +44,8 @@ export { DEFAULT_POLICY } from './config';
 // Detection + Risk Scoring
 export { detectBrowserChallenge } from './core/BrowserChallengeDetector';
 export type { BrowserChallengeSignal } from './core/BrowserChallengeDetector';
-export {
-  classifyDestructiveAction,
-  getBulkThreshold,
-  isDestructiveGatingEnabled,
-  hashArgs,
-} from './core/DestructiveClassifier';
-export type { DestructiveClassification, DestructiveSeverity } from './core/DestructiveClassifier';
 export { scoreIrreversibility } from './core/IrreversibilityScorer';
 export type { IrreversibilityAssessment } from './core/IrreversibilityScorer';
-export { MemoryRiskForecaster } from './core/MemoryRiskForecaster';
-export type { MemoryRiskAssessment, SimulatedPath } from './core/MemoryRiskForecaster';
 export { trustRateLimiter, TrustRateLimiter } from './core/TrustRateLimiter';
 export type { EscalationLevel, TrustRateLimiterState } from './core/TrustRateLimiter';
 export { syncToolShieldDefaults } from './toolshield/sync';

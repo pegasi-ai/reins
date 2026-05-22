@@ -65,14 +65,6 @@ export interface InterventionMetadata {
   recommendScreenshotReview?: boolean;
   /** Current cooldown escalation level (0=normal, 1=heightened, 2=restricted). */
   cooldownLevel?: number;
-  /** Destructive-intercept severity for UI and audit context. */
-  destructiveSeverity?: 'HIGH' | 'CATASTROPHIC';
-  /** Reasons from destructive classifier. */
-  destructiveReasons?: string[];
-  /** Optional bulk count identified by destructive classifier. */
-  destructiveBulkCount?: number;
-  /** Optional user-facing target (mailbox/path/host). */
-  destructiveTarget?: string;
   /** Require channel approvals to come via reins_respond (fail-secure if unavailable). */
   requiresRespondToolApproval?: boolean;
 }
