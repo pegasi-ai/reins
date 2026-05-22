@@ -1,6 +1,6 @@
-#!/bin/sh
-# Reins PreToolUse hook — wrapper for the globally installed @pegasi/reins package.
-# Requires: npm install -g @pegasi/reins
+#!/usr/bin/env sh
+# Reins PreToolUse hook — wrapper for the globally installed @pegasi-ai/reins package.
+# Requires: npm install -g @pegasi-ai/reins
 set -e
 
 REINS_ROOT="$(npm root -g 2>/dev/null)/@pegasi/reins"

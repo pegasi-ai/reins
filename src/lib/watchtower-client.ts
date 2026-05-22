@@ -42,6 +42,15 @@ export interface SignupCliResult {
   message: string;
 }
 
+export interface RedeemBootstrapResult {
+  api_key: string;
+  dashboard_url?: string;
+  organization?: {
+    id: string;
+    name: string;
+  };
+}
+
 /**
  * POST /api/auth/signup-cli — creates or signs in a user by email and returns
  * a fresh API key + magic-link dashboard URL. No prior key needed.
@@ -74,6 +83,52 @@ export async function signupCli(
   }
 
   return { api_key, dashboard_url, message };
+}
+
+/**
+ * POST /api/auth/reins-bootstrap/redeem — redeems an explicit org bootstrap token
+ * for a fresh API key. Used by enterprise-managed installs.
+ */
+export async function redeemReinsBootstrap(
+  token: string,
+  baseUrl: string
+): Promise<RedeemBootstrapResult> {
+  const url = buildWatchtowerUrl(baseUrl, '/api/auth/reins-bootstrap/redeem');
+  const { status, body } = await nodeRequest(
+    'POST',
+    url,
+    {},
+    JSON.stringify({ token }),
+    15_000
+  );
+
+  if (status < 200 || status >= 300) {
+    throw new Error(`Reins bootstrap redemption failed: HTTP ${status} — ${body.trim()}`);
+  }
+
+  const raw = JSON.parse(body) as unknown;
+  const p = raw && typeof raw === 'object' ? (raw as Record<string, unknown>) : {};
+  const api_key = typeof p['api_key'] === 'string' ? p['api_key'] : '';
+  if (!api_key) {
+    throw new Error('Reins bootstrap redemption returned no API key.');
+  }
+
+  const organization =
+    p['organization'] && typeof p['organization'] === 'object'
+      ? (p['organization'] as Record<string, unknown>)
+      : null;
+
+  return {
+    api_key,
+    dashboard_url: typeof p['dashboard_url'] === 'string' ? p['dashboard_url'] : undefined,
+    organization:
+      organization && typeof organization['id'] === 'string' && typeof organization['name'] === 'string'
+        ? {
+            id: organization['id'],
+            name: organization['name'],
+          }
+        : undefined,
+  };
 }
 
 export interface RunStartPayload {

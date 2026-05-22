@@ -14,6 +14,7 @@ export interface WatchtowerSettings {
   org_id?: string;
   team_id?: string;
   device_id?: string;
+  bootstrapToken?: string;
 }
 
 interface ReinsConfigFile {
@@ -27,6 +28,11 @@ export interface WatchtowerCredentials {
   dashboardUrl?: string;
   email?: string;
   source: 'config' | 'env';
+}
+
+export interface WatchtowerBootstrap {
+  token: string;
+  baseUrl: string;
 }
 
 function getWatchtowerConfigFilePath(): string {
@@ -106,6 +112,29 @@ export async function resolveWatchtowerCredentials(): Promise<WatchtowerCredenti
     email: saved?.email?.trim(),
     source: 'config',
   };
+}
+
+export async function resolveWatchtowerBootstrap(): Promise<WatchtowerBootstrap | null> {
+  const baseUrl =
+    process.env.REINS_CLOUD_BASE_URL?.trim()
+    || process.env.REINS_WATCHTOWER_BASE_URL?.trim()
+    || process.env.CLAWREINS_WATCHTOWER_BASE_URL?.trim()
+    || DEFAULT_WATCHTOWER_BASE_URL;
+
+  const saved = await loadWatchtowerSettings();
+  const token =
+    process.env.REINS_ENROLLMENT_TOKEN?.trim()
+    || process.env.REINS_BOOTSTRAP_TOKEN?.trim()
+    || process.env.CLAWREINS_ENROLLMENT_TOKEN?.trim()
+    || process.env.CLAWREINS_BOOTSTRAP_TOKEN?.trim()
+    || saved?.bootstrapToken?.trim()
+    || '';
+
+  if (!token) {
+    return null;
+  }
+
+  return { token, baseUrl };
 }
 
 export function getWatchtowerConfigPath(): string {
