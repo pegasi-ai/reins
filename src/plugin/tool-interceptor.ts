@@ -7,7 +7,6 @@ import { Interceptor } from '../core/Interceptor';
 import { logger } from '../core/Logger';
 import { detectBrowserChallenge } from '../core/BrowserChallengeDetector';
 import { scoreIrreversibility, IrreversibilityAssessment } from '../core/IrreversibilityScorer';
-import { MemoryRiskForecaster, MemoryRiskAssessment } from '../core/MemoryRiskForecaster';
 import { trustRateLimiter } from '../core/TrustRateLimiter';
 import { InterventionMetadata } from '../types';
 import { BrowserSessionStore } from '../storage/BrowserSessionStore';
@@ -77,8 +76,6 @@ const EXPLICIT_CONFIRM_IRREVERSIBILITY_THRESHOLD = ((): number => {
   const parsed = raw ? Number.parseInt(raw, 10) : NaN;
   return Number.isFinite(parsed) && parsed > 0 ? parsed : 80;
 })();
-const EXPLICIT_CONFIRM_MEMORY_THRESHOLD = 85;
-const memoryForecaster = new MemoryRiskForecaster();
 
 export interface BeforeToolCallEvent {
   toolName: string;
@@ -137,22 +134,14 @@ export function createToolCallHook(
     }
 
     const irreversibility = scoreIrreversibility(moduleName, methodName, params);
-    const sessionKeyForMemory = ctx.sessionKey || `local:${ctx.agentId || 'default'}`;
-    const memoryRisk = memoryForecaster.assess(
-      sessionKeyForMemory,
-      moduleName,
-      methodName,
-      params,
-      irreversibility
-    );
+    const sessionKey = ctx.sessionKey || `local:${ctx.agentId || 'default'}`;
     const intervention = buildInterventionMetadata(
       moduleName,
       methodName,
       toolName,
       params,
       irreversibility,
-      memoryRisk,
-      sessionKeyForMemory
+      sessionKey
     );
 
     try {
@@ -185,7 +174,6 @@ function buildInterventionMetadata(
   toolName: string,
   params: Record<string, unknown>,
   irreversibility: IrreversibilityAssessment,
-  memoryRisk: MemoryRiskAssessment,
   sessionKey: string
 ): InterventionMetadata | undefined {
   const intervention: InterventionMetadata = {};
@@ -226,35 +214,6 @@ function buildInterventionMetadata(
     }
     intervention.interventionReason =
       'Irreversible action detected. Requires explicit token confirmation, not YES/NO.';
-  }
-
-  if (memoryRisk.shouldPause) {
-    intervention.forceAsk = true;
-    const topPaths = memoryRisk.simulatedPaths
-      .map((path) => `${path.name} (${path.risk}/100)`)
-      .join('; ');
-    const memoryLine =
-      `Memory risk forecast ${memoryRisk.overallRisk}/100 ` +
-      `(drift ${memoryRisk.driftScore}, salami ${memoryRisk.salamiIndex}, commitment ${memoryRisk.commitmentCreep}).`;
-
-    intervention.overrideDescription = intervention.overrideDescription
-      ? `${intervention.overrideDescription} ${memoryLine}`
-      : memoryLine;
-
-    intervention.interventionReason = topPaths
-      ? `Predicted N+1 danger paths: ${topPaths}.`
-      : 'Memory drift indicates unsafe next-step trajectory.';
-
-    if (!intervention.actionSummary) {
-      intervention.actionSummary = memoryRisk.summary;
-    }
-
-    if (memoryRisk.overallRisk >= EXPLICIT_CONFIRM_MEMORY_THRESHOLD) {
-      intervention.requiresExplicitConfirmation = true;
-      if (!intervention.confirmationToken) {
-        intervention.confirmationToken = generateConfirmationToken(moduleName, methodName);
-      }
-    }
   }
 
   // Cooldown escalation: tighten posture after repeated denials.
