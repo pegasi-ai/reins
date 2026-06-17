@@ -8,7 +8,7 @@ import { createHash } from 'crypto';
 import fs from 'fs-extra';
 import os from 'os';
 import path from 'path';
-import { getDataPath, getPreferredDataPath } from './data-dir';
+import { getDataPath } from './data-dir';
 
 export interface ScanCheck {
   id: string;
@@ -678,7 +678,7 @@ export class SecurityScanner {
 
     if (!baseline) {
       await fs.ensureDir(path.dirname(this.identityHashesPath));
-      await fs.writeJson(getPreferredDataPath('agent-identity-hashes.json'), currentHashes, { spaces: 2 });
+      await fs.writeJson(this.identityHashesPath, currentHashes, { spaces: 2 });
       return this.warn(
         'AGENT_IDENTITY_INTEGRITY',
         `baseline created for ${foundFiles.length} identity file(s) — future changes will be flagged`,
@@ -693,6 +693,12 @@ export class SecurityScanner {
         tampered.push(`${path.basename(filePath)} (new)`);
       } else if (baselineHash !== currentHash) {
         tampered.push(path.basename(filePath));
+      }
+    }
+
+    for (const filePath of Object.keys(baseline)) {
+      if (!(filePath in currentHashes)) {
+        tampered.push(`${path.basename(filePath)} (deleted)`);
       }
     }
 
