@@ -4,6 +4,7 @@
  */
 
 import { constants as FsConstants } from 'fs';
+import { createHash } from 'crypto';
 import fs from 'fs-extra';
 import os from 'os';
 import path from 'path';
@@ -110,6 +111,9 @@ const REMEDIATIONS = {
   nodeVersion: 'Upgrade Node.js to a version not affected by CVE-2026-21636',
   controlUiAuth: 'Disable auth bypass flags and require authentication for the Control UI',
   browser: 'Set headless: true in your browser skill config to reduce DOM prompt-injection risk',
+  agentIdentity:
+    'Review SOUL.md, MEMORY.md, and IDENTITY.md for unauthorized modifications (OWASP AST05). '
+    + 'If the change was intentional, delete the baseline at ~/.openclaw/reins/agent-identity-hashes.json to reset it.',
 } as const;
 
 const KEY_VALUE_PATTERNS = (key: string): RegExp[] => [
@@ -145,12 +149,15 @@ const CONTROL_UI_BYPASS_PATTERN =
   /"?(authBypass|auth_bypass|skipAuth|noAuth|disableAuth)"?\s*[:=]\s*(true|yes|1)/i;
 const BROWSER_CONTEXT_PATTERN = /browser/i;
 
+const IDENTITY_FILE_NAMES = ['SOUL.md', 'MEMORY.md', 'IDENTITY.md'] as const;
+
 export class SecurityScanner {
   private readonly userHome: string;
   private readonly cwd: string;
   private readonly openclawHome: string;
   private readonly openclawConfigPath: string;
   private readonly policyPath: string;
+  private readonly identityHashesPath: string;
 
   constructor() {
     this.userHome = os.homedir();
@@ -158,6 +165,7 @@ export class SecurityScanner {
     this.openclawHome = process.env.OPENCLAW_HOME || path.join(this.userHome, '.openclaw');
     this.openclawConfigPath = process.env.OPENCLAW_CONFIG || path.join(this.openclawHome, 'openclaw.json');
     this.policyPath = getDataPath('policy.json');
+    this.identityHashesPath = getDataPath('agent-identity-hashes.json');
   }
 
   async run(): Promise<ScanReport> {
@@ -235,6 +243,7 @@ export class SecurityScanner {
       await this.checkNodeVersion(context),
       await this.checkControlUiAuth(context),
       await this.checkBrowserUnsandboxed(context),
+      await this.checkAgentIdentityIntegrity(),
     ];
   }
 
@@ -629,6 +638,82 @@ export class SecurityScanner {
     }
 
     return this.fail('BROWSER_UNSANDBOXED', 'browser is not sandboxed', REMEDIATIONS.browser);
+  }
+
+  private async checkAgentIdentityIntegrity(): Promise<ScanCheck> {
+    const searchDirs = [this.openclawHome, this.cwd];
+    const foundFiles: string[] = [];
+
+    for (const dir of searchDirs) {
+      for (const name of IDENTITY_FILE_NAMES) {
+        const filePath = path.join(dir, name);
+        if (await fs.pathExists(filePath)) {
+          foundFiles.push(filePath);
+        }
+      }
+    }
+
+    if (foundFiles.length === 0) {
+      return this.pass('AGENT_IDENTITY_INTEGRITY', 'no agent identity files found');
+    }
+
+    const currentHashes: Record<string, string> = {};
+    for (const filePath of foundFiles) {
+      try {
+        const content = await fs.readFile(filePath);
+        currentHashes[filePath] = createHash('sha256').update(content).digest('hex');
+      } catch {
+        // Skip unreadable files.
+      }
+    }
+
+    let baseline: Record<string, string> | null = null;
+    try {
+      if (await fs.pathExists(this.identityHashesPath)) {
+        baseline = (await fs.readJson(this.identityHashesPath)) as Record<string, string>;
+      }
+    } catch {
+      // Corrupted baseline — treat as absent and recreate.
+    }
+
+    if (!baseline) {
+      await fs.ensureDir(path.dirname(this.identityHashesPath));
+      await fs.writeJson(this.identityHashesPath, currentHashes, { spaces: 2 });
+      return this.warn(
+        'AGENT_IDENTITY_INTEGRITY',
+        `baseline created for ${foundFiles.length} identity file(s) — future changes will be flagged`,
+        REMEDIATIONS.agentIdentity
+      );
+    }
+
+    const tampered: string[] = [];
+    for (const [filePath, currentHash] of Object.entries(currentHashes)) {
+      const baselineHash = baseline[filePath];
+      if (!baselineHash) {
+        tampered.push(`${path.basename(filePath)} (new)`);
+      } else if (baselineHash !== currentHash) {
+        tampered.push(path.basename(filePath));
+      }
+    }
+
+    for (const filePath of Object.keys(baseline)) {
+      if (!(filePath in currentHashes)) {
+        tampered.push(`${path.basename(filePath)} (deleted)`);
+      }
+    }
+
+    if (tampered.length > 0) {
+      return this.fail(
+        'AGENT_IDENTITY_INTEGRITY',
+        `unexpected modification to identity file(s): ${tampered.join(', ')}`,
+        REMEDIATIONS.agentIdentity
+      );
+    }
+
+    return this.pass(
+      'AGENT_IDENTITY_INTEGRITY',
+      `${foundFiles.length} identity file(s) match baseline`
+    );
   }
 
   private computeFixActions(context: ScanContext): FixAction[] {
